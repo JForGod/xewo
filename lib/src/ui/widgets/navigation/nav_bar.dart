@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../themes/app_theme.dart';
-import '../common/logo_placeholder.dart';
-import 'nav_item.dart';
+import '../../../state/providers/navigation_provider.dart';
 
-class NavBar extends StatelessWidget {
+class NavBar extends ConsumerWidget {
   const NavBar({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedNavItem = ref.watch(selectedNavItemProvider);
+
     return Container(
       width: AppTheme.navBarWidth,
       color: AppTheme.neutral50,
@@ -15,80 +17,169 @@ class NavBar extends StatelessWidget {
         children: [
           // Logo区域 (APP-NAV-LOG-001)
           Container(
-            padding: const EdgeInsets.all(AppTheme.spacingMd),
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMd),
+            decoration: BoxDecoration(
+              color: AppTheme.neutral50,
+              border: Border(
+                bottom: BorderSide(
+                  color: AppTheme.neutral600.withOpacity(0.1),
+                ),
+              ),
+            ),
             child: Row(
               children: [
-                const LogoPlaceholder(size: 24, color: Colors.blue),
-                const SizedBox(width: AppTheme.spacingSm),
                 Text(
                   'xEwo IDE',
-                  style: AppTheme.titleLarge,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSizeBase,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.neutral800,
+                  ),
                 ),
               ],
             ),
           ),
-          
-          // 导航项列表
+
+          // 导航项目列表
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(
                 vertical: AppTheme.spacingXs,
+                horizontal: AppTheme.spacingMd,
               ),
-              children: const [
-                NavItem(
+              children: [
+                _buildNavItem(
+                  context: context,
                   icon: Icons.home,
                   label: '主页',
-                  id: 'home',
+                  isSelected: selectedNavItem == 'home',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'home',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.folder,
                   label: '项目管理',
-                  id: 'projects',
+                  isSelected: selectedNavItem == 'projects',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'projects',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.analytics,
                   label: '代码分析',
-                  id: 'analysis',
+                  isSelected: selectedNavItem == 'analysis',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'analysis',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.build,
                   label: '工具箱',
-                  id: 'tools',
+                  isSelected: selectedNavItem == 'tools',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'tools',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.bug_report,
                   label: '调试控制台',
-                  id: 'debug',
+                  isSelected: selectedNavItem == 'debug',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'debug',
                 ),
-                NavItem(
-                  icon: Icons.smart_toy,
+                _buildNavItem(
+                  context: context,
+                  icon: Icons.chat,
                   label: 'AI助手',
-                  id: 'ai',
+                  isSelected: selectedNavItem == 'ai',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'ai',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.extension,
                   label: '扩展市场',
-                  id: 'extensions',
+                  isSelected: selectedNavItem == 'extensions',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'extensions',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.school,
                   label: '学习系统',
-                  id: 'learning',
+                  isSelected: selectedNavItem == 'learn',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'learn',
                 ),
-                NavItem(
+                _buildNavItem(
+                  context: context,
                   icon: Icons.help,
                   label: '帮助文档',
-                  id: 'help',
-                ),
-                NavItem(
-                  icon: Icons.settings,
-                  label: '设置',
-                  id: 'settings',
+                  isSelected: selectedNavItem == 'help',
+                  onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'help',
                 ),
               ],
             ),
           ),
+
+          // 底部设置按钮
+          Container(
+            padding: const EdgeInsets.all(AppTheme.spacingMd),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: AppTheme.neutral600.withOpacity(0.1),
+                ),
+              ),
+            ),
+            child: _buildNavItem(
+              context: context,
+              icon: Icons.settings,
+              label: '设置',
+              isSelected: selectedNavItem == 'settings',
+              onTap: () => ref.read(selectedNavItemProvider.notifier).state = 'settings',
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        child: Container(
+          height: AppTheme.navItemHeight,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTheme.spacingMd,
+            vertical: AppTheme.spacingXs,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected ? AppTheme.primary100 : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: isSelected ? AppTheme.primary700 : AppTheme.neutral600,
+              ),
+              const SizedBox(width: AppTheme.spacingSm),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: AppTheme.fontSizeSm,
+                  color: isSelected ? AppTheme.primary700 : AppTheme.neutral600,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

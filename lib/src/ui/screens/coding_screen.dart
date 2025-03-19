@@ -1,0 +1,15 @@
+FileTreeNodeWidget(
+  node: node,
+  depth: depth,
+  isSelected: selectedNode?.path == node.path,
+  isExpanded: expandedPaths.contains(node.path),
+  onTap: () => _handleNodeTap(node),
+  onDoubleTap: () => _handleNodeDoubleTap(node),
+  onExpand: node.type == FileNodeType.directory ? () => _toggleNodeExpansion(node) : null,
+  onDragCompleted: (path) => _handleDragCompleted(path),
+  isDraggable: true,
+  isDropTarget: true,
+  onAcceptDrop: (details) => _handleDrop(details, node),
+  onDragUpdate: _handleDragUpdate,
+  onRightClick: (offset) => _showContextMenu(context, offset, node),
+) 

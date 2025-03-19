@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../../../state/models/file_node.dart';
 import '../../../state/providers/file_tree_provider.dart';
 import '../../themes/app_theme.dart';
-import 'version_control_indicator.dart';
 
 /// 支持拖放操作的文件树节点组件
-class DraggableFileTreeNode extends StatelessWidget {
+class DraggableFileTreeNode extends StatefulWidget {
   final FileNode node;
   final int level;
   final bool isExpanded;
   final bool isSelected;
-  final bool isMultiSelected; // 是否在多选中被选中
-  final bool isMultiSelectMode; // 是否处于多选模式
   final Function(FileNode) onNodeTap;
-  final Function(FileNode, RawKeyEvent, bool) onNodeKeyDown; // 添加键盘事件处理
   final Function(FileNode, Offset) onNodeRightClick;
   final Function(FileNode, FileNode) onNodeDrop;
 
@@ -23,281 +19,263 @@ class DraggableFileTreeNode extends StatelessWidget {
     required this.level,
     required this.isExpanded,
     required this.isSelected,
-    this.isMultiSelected = false,
-    this.isMultiSelectMode = false,
     required this.onNodeTap,
-    required this.onNodeKeyDown,
     required this.onNodeRightClick,
     required this.onNodeDrop,
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 节点本身（可拖动）
-        LongPressDraggable<FileNode>(
-          data: node,
-          feedback: Material(
-            elevation: 4.0,
-            child: Container(
-              padding: const EdgeInsets.all(AppTheme.spacingSm),
-              color: Theme.of(context).highlightColor,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _getIconForNode(node),
-                    size: 18,
-                    color: _getColorForNode(context, node),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    node.name,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          childWhenDragging: Opacity(
-            opacity: 0.5,
-            child: _buildNodeContent(context),
-          ),
-          onDragStarted: () {
-            // 拖动开始时的处理
-          },
-          child: DragTarget<FileNode>(
-            builder: (context, candidateData, rejectedData) {
-              return _buildNodeContent(
-                context,
-                isDropTarget: candidateData.isNotEmpty,
-              );
-            },
-            onWillAccept: (data) {
-              // 不接受拖放到自身
-              if (data == node) return false;
-              
-              // 不接受拖放到非目录
-              if (!node.isDirectory) return false;
-              
-              // 不接受拖放到子目录（防止循环）
-              if (data!.isDirectory && node.path.startsWith(data.path)) return false;
-              
-              return true;
-            },
-            onAccept: (data) {
-              onNodeDrop(data, node);
-            },
-          ),
-        ),
-        
-        // 子节点（如果是展开的文件夹）
-        if (node.isDirectory && isExpanded && node.children.isNotEmpty)
-          ...node.children.map((child) => DraggableFileTreeNode(
-                node: child,
-                level: level + 1,
-                isExpanded: isExpanded && child.isDirectory,
-                isSelected: isSelected && node.path == child.path,
-                isMultiSelected: isMultiSelected && node.path == child.path,
-                isMultiSelectMode: isMultiSelectMode,
-                onNodeTap: onNodeTap,
-                onNodeKeyDown: onNodeKeyDown,
-                onNodeRightClick: onNodeRightClick,
-                onNodeDrop: onNodeDrop,
-              )),
-      ],
+  State<DraggableFileTreeNode> createState() => _DraggableFileTreeNodeState();
+}
+
+class _DraggableFileTreeNodeState extends State<DraggableFileTreeNode> with SingleTickerProviderStateMixin {
+  bool _isDragTarget = false;
+  bool _isHovered = false;
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
   }
 
-  /// 构建节点内容
-  Widget _buildNodeContent(BuildContext context, {bool isDropTarget = false}) {
-    final theme = Theme.of(context);
-    
-    // 计算左边距
-    final leftPadding = (level * 16.0) + 8.0;
-    
-    return GestureDetector(
-      onTap: () => onNodeTap(node),
-      onSecondaryTapDown: (details) => onNodeRightClick(node, details.globalPosition),
-      child: Focus(
-        onKeyEvent: (node, event) {
-          if (event is RawKeyDownEvent) {
-            onNodeKeyDown(this.node, event, isMultiSelectMode);
-            return KeyEventResult.handled;
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) {
+        setState(() => _isHovered = true);
+        _controller.forward();
+      },
+      onExit: (_) {
+        setState(() => _isHovered = false);
+        _controller.reverse();
+      },
+      child: DragTarget<FileNode>(
+        onWillAccept: (data) {
+          if (data == null) return false;
+          // 不允许拖拽到自身或子目录
+          if (data == widget.node || 
+              widget.node.path.startsWith('${data.path}/')) {
+            return false;
           }
-          return KeyEventResult.ignored;
+          // 只允许拖拽到目录
+          return widget.node.type == FileNodeType.directory;
         },
-        child: Container(
-          height: 24,
-          decoration: BoxDecoration(
-            color: _getNodeBackgroundColor(context),
-            border: isDropTarget
-                ? Border.all(color: theme.colorScheme.primary, width: 1)
-                : null,
-          ),
-          padding: EdgeInsets.only(left: leftPadding),
-          child: Row(
-            children: [
-              // 展开/折叠图标（仅目录显示）
-              if (node.isDirectory)
-                Icon(
-                  isExpanded ? Icons.arrow_drop_down : Icons.arrow_right,
-                  size: 16,
-                  color: theme.colorScheme.onSurface.withOpacity(0.5),
-                ),
-              if (!node.isDirectory) const SizedBox(width: 16),
-              
-              // 文件/文件夹图标
-              Icon(
-                _getIconForNode(node),
-                size: 16,
-                color: _getColorForNode(context, node),
+        onAccept: (data) {
+          widget.onNodeDrop(data, widget.node);
+          setState(() => _isDragTarget = false);
+        },
+        onLeave: (_) {
+          setState(() => _isDragTarget = false);
+        },
+        onMove: (_) {
+          if (!_isDragTarget) {
+            setState(() => _isDragTarget = true);
+          }
+        },
+        builder: (context, candidateData, rejectedData) {
+          return ScaleTransition(
+            scale: _scaleAnimation,
+            child: Draggable<FileNode>(
+              data: widget.node,
+              dragAnchorStrategy: pointerDragAnchorStrategy,
+              feedback: _buildDragFeedback(context),
+              child: _buildNodeContent(context),
+              childWhenDragging: Opacity(
+                opacity: 0.5,
+                child: _buildNodeContent(context),
               ),
-              const SizedBox(width: 4),
-              
-              // 多选复选框
-              if (isMultiSelectMode)
-                Checkbox(
-                  value: isMultiSelected,
-                  onChanged: (value) => onNodeTap(node),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                ),
-              
-              // 文件/文件夹名称
-              Expanded(
-                child: Text(
-                  node.name,
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: isSelected || isMultiSelected ? FontWeight.bold : FontWeight.normal,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              
-              // 版本控制状态指示器
-              VersionControlIndicator(node: node, size: 14),
-              
-              const SizedBox(width: 4),
-            ],
+              onDragStarted: () {
+                HapticFeedback.lightImpact();
+              },
+              onDragEnd: (_) {
+                HapticFeedback.mediumImpact();
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDragFeedback(BuildContext context) {
+    return Material(
+      elevation: 8,
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 8,
+        ),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary,
+            width: 2,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              widget.node.type == FileNodeType.directory
+                  ? Icons.folder
+                  : _getFileIcon(),
+              size: 20,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              widget.node.name,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  /// 获取节点背景颜色
-  Color _getNodeBackgroundColor(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    if (isMultiSelected) {
-      return theme.colorScheme.primaryContainer;
-    } else if (isSelected) {
-      return theme.colorScheme.primary.withOpacity(0.2);
-    } else {
-      return Colors.transparent;
-    }
+  Widget _buildNodeContent(BuildContext context) {
+    return GestureDetector(
+      onTap: () => widget.onNodeTap(widget.node),
+      onSecondaryTapDown: (details) => 
+          widget.onNodeRightClick(widget.node, details.globalPosition),
+      child: Container(
+        height: 32,
+        padding: EdgeInsets.only(left: widget.level * 16.0),
+        decoration: BoxDecoration(
+          color: _getBackgroundColor(context),
+          border: _isDragTarget
+              ? Border.all(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 2,
+                )
+              : null,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            if (widget.node.type == FileNodeType.directory)
+              AnimatedRotation(
+                duration: const Duration(milliseconds: 200),
+                turns: widget.isExpanded ? 0.25 : 0,
+                child: Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
+              ),
+            const SizedBox(width: 4),
+            Icon(
+              widget.node.type == FileNodeType.directory
+                  ? widget.isExpanded ? Icons.folder_open : Icons.folder
+                  : _getFileIcon(),
+              size: 20,
+              color: _getIconColor(context),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.node.name,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 14,
+                  fontWeight: widget.isSelected
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_isHovered || widget.isSelected)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, size: 16),
+                    onPressed: () => widget.onNodeRightClick(
+                      widget.node,
+                      Offset.zero, // 这里需要计算正确的位置
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 24,
+                      minHeight: 24,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
-  /// 获取节点图标
-  IconData _getIconForNode(FileNode node) {
-    if (node.isDirectory) {
-      return isExpanded ? Icons.folder_open : Icons.folder;
-    } else {
-      // 根据文件扩展名返回不同图标
-      final extension = node.name.split('.').last.toLowerCase();
-      switch (extension) {
-        case 'dart':
-          return Icons.code;
-        case 'html':
-          return Icons.html;
-        case 'css':
-          return Icons.css;
-        case 'js':
-        case 'ts':
-          return Icons.javascript;
-        case 'json':
-          return Icons.data_object;
-        case 'md':
-          return Icons.description;
-        case 'png':
-        case 'jpg':
-        case 'jpeg':
-        case 'gif':
-        case 'svg':
-          return Icons.image;
-        case 'pdf':
-          return Icons.picture_as_pdf;
-        case 'zip':
-        case 'rar':
-        case '7z':
-          return Icons.archive;
-        case 'mp3':
-        case 'wav':
-        case 'ogg':
-          return Icons.audio_file;
-        case 'mp4':
-        case 'avi':
-        case 'mov':
-          return Icons.video_file;
-        default:
-          return Icons.insert_drive_file;
-      }
+  Color _getBackgroundColor(BuildContext context) {
+    if (_isDragTarget) {
+      return Theme.of(context).colorScheme.primary.withOpacity(0.15);
     }
+    if (widget.isSelected) {
+      return Theme.of(context).colorScheme.primary.withOpacity(0.1);
+    }
+    if (_isHovered) {
+      return Theme.of(context).colorScheme.onSurface.withOpacity(0.05);
+    }
+    return Colors.transparent;
   }
 
-  /// 获取节点图标颜色
-  Color _getColorForNode(BuildContext context, FileNode node) {
-    final theme = Theme.of(context);
-    
-    if (node.isDirectory) {
-      return Colors.amber;
-    } else {
-      // 根据文件扩展名返回不同颜色
-      final extension = node.name.split('.').last.toLowerCase();
-      switch (extension) {
-        case 'dart':
-          return Colors.blue;
-        case 'html':
-          return Colors.orange;
-        case 'css':
-          return Colors.purple;
-        case 'js':
-          return Colors.yellow.shade800;
-        case 'ts':
-          return Colors.blue.shade800;
-        case 'json':
-          return Colors.green;
-        case 'md':
-          return Colors.blueGrey;
-        case 'png':
-        case 'jpg':
-        case 'jpeg':
-        case 'gif':
-        case 'svg':
-          return Colors.pink;
-        case 'pdf':
-          return Colors.red;
-        case 'zip':
-        case 'rar':
-        case '7z':
-          return Colors.brown;
-        case 'mp3':
-        case 'wav':
-        case 'ogg':
-          return Colors.purple;
-        case 'mp4':
-        case 'avi':
-        case 'mov':
-          return Colors.red.shade800;
-        default:
-          return theme.colorScheme.onSurface.withOpacity(0.7);
-      }
+  Color _getIconColor(BuildContext context) {
+    if (widget.node.type == FileNodeType.directory) {
+      return Theme.of(context).colorScheme.primary;
+    }
+    return Theme.of(context).colorScheme.onSurface;
+  }
+
+  IconData _getFileIcon() {
+    final extension = widget.node.name.split('.').last.toLowerCase();
+    switch (extension) {
+      case 'dart':
+        return Icons.code;
+      case 'json':
+        return Icons.data_object;
+      case 'yaml':
+      case 'yml':
+        return Icons.settings;
+      case 'md':
+        return Icons.description;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+        return Icons.image;
+      default:
+        return Icons.insert_drive_file;
     }
   }
 } 

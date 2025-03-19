@@ -2,18 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
-import 'package:flutter_highlight/themes/vs.dart';
-import 'package:flutter_highlight/themes/vs2015.dart';
-import '../../../core/editor/cursor_manager.dart';
-import '../../../core/editor/text_position_utils.dart';
-import '../../../core/editor/language_manager.dart';
-import '../../../core/editor/theme_manager.dart';
-import '../../../state/providers/editor_settings_provider.dart';
-import '../../../services/editor/language_support.dart';
-import '../../../services/editor/performance_service.dart';
-import '../../../services/editor/indentation_service.dart';
-import '../../../services/editor/bracket_matching_service.dart';
-import '../../../services/editor/refactoring_service.dart';
+import 'package:flutter_highlight/themes/vs.dart' as vs_theme;
+import 'package:flutter_highlight/themes/vs2015.dart' as vs2015_theme;
+import 'package:highlight/languages/dart.dart' as dart_lang;
+import 'package:highlight/languages/javascript.dart' as js_lang;
+import 'package:highlight/languages/python.dart' as py_lang;
+import 'package:highlight/languages/json.dart' as json_lang;
+import 'package:highlight/languages/yaml.dart' as yaml_lang;
+import 'package:highlight/languages/markdown.dart' as md_lang;
+import 'package:highlight/languages/xml.dart' as xml_lang;
+import 'package:highlight/languages/css.dart' as css_lang;
+import 'package:highlight/languages/sql.dart' as sql_lang;
+import 'package:highlight/languages/bash.dart' as bash_lang;
+import 'package:highlight/highlight.dart' show highlight;
+import 'package:xewo/src/ui/widgets/editor/code_folding.dart';
 
 /// 编辑器核心组件
 class EditorCore extends ConsumerStatefulWidget {
@@ -21,7 +23,7 @@ class EditorCore extends ConsumerStatefulWidget {
   final String text;
   
   /// 文本控制器
-  final TextEditingController? controller;
+  final TextEditingController controller;
   
   /// 语言
   final String language;
@@ -36,18 +38,30 @@ class EditorCore extends ConsumerStatefulWidget {
   final Function(String)? onTextChanged;
   
   /// 光标位置变化回调
-  final Function(int)? onCursorPositionChanged;
+  final Function(int, int)? onCursorPositionChanged;
+  
+  /// 选择变化回调
+  final Function(TextSelection)? onSelectionChanged;
+  
+  /// 滚动控制器
+  final ScrollController scrollController;
+  
+  /// 折叠区域
+  final List<FoldingRegion> foldingRegions;
   
   /// 构造函数
   const EditorCore({
     Key? key,
     required this.text,
-    this.controller,
+    required this.controller,
     required this.language,
     this.filePath,
     this.readOnly = false,
     this.onTextChanged,
     this.onCursorPositionChanged,
+    this.onSelectionChanged,
+    required this.scrollController,
+    required this.foldingRegions,
   }) : super(key: key);
   
   @override
@@ -55,706 +69,323 @@ class EditorCore extends ConsumerStatefulWidget {
 }
 
 class _EditorCoreState extends ConsumerState<EditorCore> {
-  late TextEditingController _controller;
-  // 使用弱引用方式创建FocusNode，避免循环引用
-  final FocusNode _focusNode = FocusNode(debugLabel: 'EditorCoreFocusNode');
-  final FocusNode _textFieldFocusNode = FocusNode(debugLabel: 'EditorTextFieldFocusNode');
-  
-  // 性能优化相关
-  List<String>? _lines;
-  int _startLine = 0;
-  int _endLine = 0;
-  final ScrollController _verticalScrollController = ScrollController();
-  final ScrollController _horizontalScrollController = ScrollController();
-  
-  // 高亮相关
-  TextSpan _highlightedText = const TextSpan(text: '');
-  List<int> _bracketHighlightPositions = [];
-  
+  late FocusNode _focusNode;
+  late TextSelection _selection;
+  int _cursorLine = 1;
+  int _cursorColumn = 1;
+  bool _isInitialized = false;
+  final CodeFoldingManager _foldingManager = CodeFoldingManager();
+
   @override
   void initState() {
     super.initState();
-    _controller = widget.controller ?? TextEditingController(text: widget.text);
+    _focusNode = FocusNode();
+    _selection = const TextSelection.collapsed(offset: 0);
     
-    // 添加文本变化监听
-    _controller.addListener(_onTextChanged);
+    // 监听文本变化
+    widget.controller.addListener(_handleTextChanged);
     
-    // 初始化文本
-    _initializeText(widget.text);
-    
-    // 添加滚动监听
-    _verticalScrollController.addListener(_onScroll);
-  }
-  
-  @override
-  void didUpdateWidget(EditorCore oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    
-    if (widget.controller != oldWidget.controller) {
-      _controller.removeListener(_onTextChanged);
-      _controller = widget.controller ?? TextEditingController(text: widget.text);
-      _controller.addListener(_onTextChanged);
-    }
-    
-    if (widget.text != oldWidget.text && widget.text != _controller.text) {
-      _initializeText(widget.text);
-    }
-    
-    if (widget.language != oldWidget.language) {
-      _updateHighlightedText();
-    }
+    // 监听选择变化
+    widget.controller.addListener(() {
+      if (widget.controller.selection != _selection) {
+        _handleSelectionChanged(widget.controller.selection);
+      }
+    });
+
+    // 延迟初始化以避免构建时的状态更新
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isInitialized && mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+        _updateFoldingRegions();
+      }
+    });
   }
   
   @override
   void dispose() {
-    // 先移除监听器，再释放资源
-    if (widget.controller == null) {
-      _controller.dispose();
-    } else {
-      _controller.removeListener(_onTextChanged);
-    }
-    
-    // 确保FocusNode正确释放
     _focusNode.dispose();
-    _textFieldFocusNode.dispose();
-    
-    // 确保ScrollController正确释放
-    if (_verticalScrollController.hasClients) {
-      _verticalScrollController.removeListener(_onScroll);
-    }
-    _verticalScrollController.dispose();
-    
-    if (_horizontalScrollController.hasClients) {
-      _horizontalScrollController.removeListener(() {});
-    }
-    _horizontalScrollController.dispose();
-    
+    widget.controller.removeListener(_handleTextChanged);
     super.dispose();
   }
   
-  /// 初始化文本
-  Future<void> _initializeText(String text) async {
-    final performanceService = ref.read(performanceServiceProvider);
-    
-    // 使用性能服务分块加载文本
-    final result = await performanceService.loadTextInChunks(text);
-    _lines = result.map((line) => line.toString()).toList();
-    
-    // 更新可见行
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _updateVisibleLines();
-      _updateHighlightedText();
-    });
-    
+  void _updateFoldingRegions() {
+    _foldingManager.analyzeFoldingRegions(widget.text, widget.language);
     setState(() {});
   }
   
-  /// 文本变化处理
-  void _onTextChanged() {
-    final performanceService = ref.read(performanceServiceProvider);
+  void toggleFold(int lineNumber) {
+    setState(() {
+      _foldingManager.toggleFold(lineNumber);
+      final text = _getVisibleText();
+      widget.controller.value = TextEditingValue(
+        text: text,
+        selection: widget.controller.selection,
+      );
+    });
+  }
+  
+  String _getVisibleText() {
+    final lines = widget.text.split('\n');
+    final visibleLines = <String>[];
     
-    // 获取当前文本
-    final text = _controller.text;
+    for (var i = 0; i < lines.length; i++) {
+      if (_foldingManager.isLineFolded(i)) {
+        continue;
+      }
+      
+      final foldedLine = _foldingManager.getFoldedLine(i);
+      if (foldedLine.isNotEmpty) {
+        visibleLines.add(foldedLine);
+      } else {
+        visibleLines.add(lines[i]);
+      }
+    }
     
-    // 通知外部文本变化
+    return visibleLines.join('\n');
+  }
+  
+  void _handleTextChanged() {
     if (widget.onTextChanged != null) {
-      widget.onTextChanged!(text);
+      widget.onTextChanged!(widget.controller.text);
     }
+    _updateCursorPosition();
+    _updateFoldingRegions();
+  }
+  
+  void _updateCursorPosition() {
+    final text = widget.controller.text;
+    final selection = widget.controller.selection;
     
-    // 获取光标位置
-    final selection = _controller.selection;
-    if (selection.isValid && selection.isCollapsed) {
-      // 通知外部光标位置变化
+    if (selection.isValid) {
+      int line = 1;
+      int column = 1;
+      
+      for (var i = 0; i < selection.baseOffset; i++) {
+        if (i >= text.length) break;
+        
+        if (text[i] == '\n') {
+          line++;
+          column = 1;
+        } else {
+          column++;
+        }
+      }
+      
+      setState(() {
+        _cursorLine = line;
+        _cursorColumn = column;
+      });
+      
       if (widget.onCursorPositionChanged != null) {
-        widget.onCursorPositionChanged!(selection.baseOffset);
+        widget.onCursorPositionChanged!(_cursorLine, _cursorColumn);
       }
-      
-      // 更新括号高亮
-      _updateBracketHighlight(selection.baseOffset);
-    }
-    
-    // 增量更新文本行
-    if (_lines != null) {
-      _lines = text.split('\n');
-      _updateVisibleLines();
-      _updateHighlightedText();
     }
   }
   
-  /// 滚动处理
-  void _onScroll() {
-    _updateVisibleLines();
-    _updateHighlightedText();
-  }
-  
-  /// 更新可见行
-  void _updateVisibleLines() {
-    if (_lines == null || _lines!.isEmpty) return;
-    
-    final performanceService = ref.read(performanceServiceProvider);
-    
-    // 检查滚动控制器是否已附加到滚动视图
-    if (!_verticalScrollController.hasClients) {
-      // 如果未附加，则使用默认值
-      _startLine = 0;
-      _endLine = Math.min(_lines!.length, 100); // 显示前100行
-      return;
-    }
-    
-    // 计算可见行范围
-    final scrollPosition = _verticalScrollController.position;
-    final lineHeight = 20.0; // 估计的行高
-    
-    final firstVisibleLine = (scrollPosition.pixels / lineHeight).floor();
-    final lastVisibleLine = ((scrollPosition.pixels + scrollPosition.viewportDimension) / lineHeight).ceil();
-    
-    // 获取可见行，并添加缓冲区
-    final visibleLines = performanceService.getVisibleLines(
-      _lines!,
-      Math.max(0, firstVisibleLine - 50),
-      Math.min(_lines!.length, lastVisibleLine + 50),
-    );
-    
-    _startLine = Math.max(0, firstVisibleLine - 50);
-    _endLine = Math.min(_lines!.length, lastVisibleLine + 50);
-    
-    setState(() {});
-  }
-  
-  /// 更新高亮文本
-  void _updateHighlightedText() {
-    if (_lines == null) return;
-    
-    final languageSupport = ref.read(languageSupportProvider);
-    
-    // 获取可见文本
-    final visibleText = _lines!.sublist(
-      _startLine,
-      Math.min(_lines!.length, _endLine),
-    ).join('\n');
-    
-    // 应用语法高亮
-    _highlightedText = languageSupport.highlightCode(visibleText, widget.language);
-    
-    setState(() {});
-  }
-  
-  /// 更新括号高亮
-  void _updateBracketHighlight(int cursorPosition) {
-    final bracketMatchingService = ref.read(bracketMatchingServiceProvider);
-    
-    if (!bracketMatchingService.isEnabled()) {
-      _bracketHighlightPositions = [];
-      return;
-    }
-    
-    // 获取高亮位置
-    _bracketHighlightPositions = bracketMatchingService.getHighlightPositions(
-      _controller.text,
-      cursorPosition,
-    );
-    
-    setState(() {});
-  }
-  
-  /// 处理键盘事件
-  KeyEventResult _handleKeyEvent(FocusNode node, RawKeyEvent event) {
-    if (event is! RawKeyDownEvent) return KeyEventResult.ignored;
-    
-    final indentationService = ref.read(indentationServiceProvider);
-    final bracketMatchingService = ref.read(bracketMatchingServiceProvider);
-    
-    // 获取当前文本和光标位置
-    final text = _controller.text;
-    final selection = _controller.selection;
-    
-    if (!selection.isValid) return KeyEventResult.ignored;
-    
-    // 处理回车键
-    if (event.logicalKey == LogicalKeyboardKey.enter) {
-      final newText = indentationService.handleEnterPressed(
-        text,
-        selection.baseOffset,
-        widget.language,
-      );
-      
-      // 计算新的光标位置
-      final newCursorPosition = newText.length - text.length + selection.baseOffset;
-      
-      // 更新文本和光标位置
-      _controller.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: newCursorPosition),
-      );
-      
-      return KeyEventResult.handled;
-    }
-    
-    // 处理Tab键
-    if (event.logicalKey == LogicalKeyboardKey.tab) {
-      final shiftPressed = event.isShiftPressed;
-      
-      final newText = indentationService.handleTabPressed(
-        text,
-        selection.baseOffset,
-        shiftPressed,
-      );
-      
-      // 计算新的光标位置
-      final cursorOffset = shiftPressed ? -2 : 2; // 假设缩进是2个空格
-      final newCursorPosition = Math.max(0, selection.baseOffset + cursorOffset);
-      
-      // 更新文本和光标位置
-      _controller.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: newCursorPosition),
-      );
-      
-      return KeyEventResult.handled;
-    }
-    
-    // 处理括号输入
-    final char = event.character;
-    if (char != null && (char == '(' || char == '[' || char == '{' || char == '"' || char == "'" || char == '`')) {
-      final newText = bracketMatchingService.handleBracketInput(
-        text,
-        selection.baseOffset,
-        char,
-      );
-      
-      // 更新文本和光标位置
-      _controller.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: selection.baseOffset + 1),
-      );
-      
-      return KeyEventResult.handled;
-    }
-    
-    // 处理退格键
-    if (event.logicalKey == LogicalKeyboardKey.backspace) {
-      final newText = bracketMatchingService.handleBackspace(
-        text,
-        selection.baseOffset,
-      );
-      
-      // 更新文本和光标位置
-      _controller.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: selection.baseOffset - 1),
-      );
-      
-      return KeyEventResult.handled;
-    }
-    
-    return KeyEventResult.ignored;
-  }
-  
-  /// 显示重构菜单
-  void _showRefactoringMenu(BuildContext context, Offset position) {
-    final refactoringService = ref.read(refactoringServiceProvider);
-    
-    showMenu(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx + 1,
-        position.dy + 1,
-      ),
-      items: [
-        PopupMenuItem(
-          value: RefactoringType.rename,
-          child: const Text('重命名'),
-        ),
-        PopupMenuItem(
-          value: RefactoringType.extractMethod,
-          child: const Text('提取方法'),
-        ),
-        PopupMenuItem(
-          value: RefactoringType.extractVariable,
-          child: const Text('提取变量'),
-        ),
-        PopupMenuItem(
-          value: RefactoringType.inlineVariable,
-          child: const Text('内联变量'),
-        ),
-      ],
-    ).then((value) {
-      if (value == null) return;
-      
-      switch (value) {
-        case RefactoringType.rename:
-          _showRenameDialog(context);
-          break;
-        case RefactoringType.extractMethod:
-          _showExtractMethodDialog(context);
-          break;
-        case RefactoringType.extractVariable:
-          _showExtractVariableDialog(context);
-          break;
-        case RefactoringType.inlineVariable:
-          _performInlineVariable();
-          break;
-        default:
-          break;
-      }
+  void _handleSelectionChanged(TextSelection selection) {
+    setState(() {
+      _selection = selection;
     });
-  }
-  
-  /// 显示重命名对话框
-  void _showRenameDialog(BuildContext context) {
-    final textController = TextEditingController();
     
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重命名'),
-        content: TextField(
-          controller: textController,
-          decoration: const InputDecoration(
-            labelText: '新名称',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _performRename(textController.text);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  /// 执行重命名操作
-  Future<void> _performRename(String newName) async {
-    if (newName.isEmpty || widget.filePath == null) return;
-    
-    final refactoringService = ref.read(refactoringServiceProvider);
-    
-    final result = await refactoringService.rename(
-      _controller.text,
-      _controller.selection.baseOffset,
-      newName,
-      widget.language,
-      widget.filePath!,
-    );
-    
-    if (result.success && result.newCode != null) {
-      _controller.value = TextEditingValue(
-        text: result.newCode!,
-        selection: TextSelection.collapsed(
-          offset: result.newCursorPosition ?? _controller.selection.baseOffset,
-        ),
-      );
-    } else if (!result.success && result.errorMessage != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.errorMessage!)),
-        );
-      }
-    }
-  }
-  
-  /// 显示提取方法对话框
-  void _showExtractMethodDialog(BuildContext context) {
-    final textController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('提取方法'),
-        content: TextField(
-          controller: textController,
-          decoration: const InputDecoration(
-            labelText: '方法名',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _performExtractMethod(textController.text);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  /// 执行提取方法操作
-  Future<void> _performExtractMethod(String methodName) async {
-    if (methodName.isEmpty || widget.filePath == null) return;
-    
-    final refactoringService = ref.read(refactoringServiceProvider);
-    final selection = _controller.selection;
-    
-    if (!selection.isValid || selection.isCollapsed) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先选择要提取的代码')),
-        );
-      }
-      return;
+    if (widget.onSelectionChanged != null) {
+      widget.onSelectionChanged!(selection);
     }
     
-    final result = await refactoringService.extractMethod(
-      _controller.text,
-      selection.start,
-      selection.end,
-      methodName,
-      widget.language,
-      widget.filePath!,
-    );
-    
-    if (result.success && result.newCode != null) {
-      _controller.value = TextEditingValue(
-        text: result.newCode!,
-        selection: TextSelection.collapsed(
-          offset: result.newCursorPosition ?? selection.baseOffset,
-        ),
-      );
-    } else if (!result.success && result.errorMessage != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.errorMessage!)),
-        );
-      }
-    }
-  }
-  
-  /// 显示提取变量对话框
-  void _showExtractVariableDialog(BuildContext context) {
-    final textController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('提取变量'),
-        content: TextField(
-          controller: textController,
-          decoration: const InputDecoration(
-            labelText: '变量名',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _performExtractVariable(textController.text);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  /// 执行提取变量操作
-  Future<void> _performExtractVariable(String variableName) async {
-    if (variableName.isEmpty || widget.filePath == null) return;
-    
-    final refactoringService = ref.read(refactoringServiceProvider);
-    final selection = _controller.selection;
-    
-    if (!selection.isValid || selection.isCollapsed) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先选择要提取的表达式')),
-        );
-      }
-      return;
-    }
-    
-    final result = await refactoringService.extractVariable(
-      _controller.text,
-      selection.start,
-      selection.end,
-      variableName,
-      widget.language,
-      widget.filePath!,
-    );
-    
-    if (result.success && result.newCode != null) {
-      _controller.value = TextEditingValue(
-        text: result.newCode!,
-        selection: TextSelection.collapsed(
-          offset: result.newCursorPosition ?? selection.baseOffset,
-        ),
-      );
-    } else if (!result.success && result.errorMessage != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.errorMessage!)),
-        );
-      }
-    }
-  }
-  
-  /// 执行内联变量操作
-  Future<void> _performInlineVariable() async {
-    if (widget.filePath == null) return;
-    
-    final refactoringService = ref.read(refactoringServiceProvider);
-    
-    final result = await refactoringService.inlineVariable(
-      _controller.text,
-      _controller.selection.baseOffset,
-      widget.language,
-      widget.filePath!,
-    );
-    
-    if (result.success && result.newCode != null) {
-      _controller.value = TextEditingValue(
-        text: result.newCode!,
-        selection: TextSelection.collapsed(
-          offset: result.newCursorPosition ?? _controller.selection.baseOffset,
-        ),
-      );
-    } else if (!result.success && result.errorMessage != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.errorMessage!)),
-        );
-      }
-    }
-  }
-  
-  /// 更新语法高亮
-  void _updateSyntaxHighlighting() {
-    if (_lines == null || _lines!.isEmpty) return;
-    
-    final languageSupport = ref.read(languageSupportProvider);
-    
-    // 获取可见文本
-    final visibleText = _lines!.sublist(
-      _startLine,
-      Math.min(_lines!.length, _endLine),
-    ).join('\n');
-    
-    // 应用语法高亮
-    _highlightedText = languageSupport.highlightCode(visibleText, widget.language);
-    
-    setState(() {});
-  }
-  
-  /// 高亮代码
-  Widget _buildHighlightedCode() {
-    return RichText(
-      text: _highlightedText,
-      softWrap: true,
-    );
+    _updateCursorPosition();
   }
   
   @override
   Widget build(BuildContext context) {
-    final editorSettings = ref.watch(editorSettingsProvider);
-    final languageSupport = ref.watch(languageSupportProvider);
-    
-    // 如果文本行尚未加载完成，显示加载指示器
-    if (_lines == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-    
-    return GestureDetector(
-      onSecondaryTapDown: (details) {
-        // 显示重构菜单
-        _showRefactoringMenu(context, details.globalPosition);
-      },
-      child: _buildEditorContent(context, editorSettings),
-    );
-  }
-  
-  /// 构建编辑器内容
-  Widget _buildEditorContent(BuildContext context, EditorSettings editorSettings) {
-    return RawKeyboardListener(
-      focusNode: _focusNode,
-      onKey: (RawKeyEvent event) {
-        // 处理键盘事件
-        if (event is RawKeyDownEvent) {
-          _handleKeyEvent(_focusNode, event);
-        }
-        return; // 返回void
-      },
-      child: SingleChildScrollView(
-        controller: _horizontalScrollController,
-        scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          controller: _verticalScrollController,
-          child: Container(
-            padding: const EdgeInsets.all(8.0),
-            width: MediaQuery.of(context).size.width - 50, // 提供有限宽度约束
-            child: Stack(
-              children: [
-                // 语法高亮层
-                HighlightView(
-                  _controller.text,
-                  language: widget.language,
-                  theme: Theme.of(context).brightness == Brightness.dark ? vs2015Theme : vsTheme,
-                  padding: const EdgeInsets.all(16),
-                  textStyle: TextStyle(
-                    fontFamily: editorSettings.fontFamily,
-                    fontSize: editorSettings.fontSize,
-                  ),
-                ),
-                
-                // 编辑层
-                TextField(
-                  controller: _controller,
-                  focusNode: _textFieldFocusNode, // 使用单独的FocusNode
-                  maxLines: null,
-                  style: TextStyle(
-                    fontFamily: editorSettings.fontFamily,
-                    fontSize: editorSettings.fontSize,
-                    color: Colors.transparent,
-                    backgroundColor: Colors.transparent,
-                  ),
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(16),
-                    isDense: true,
-                  ),
-                  cursorColor: Theme.of(context).primaryColor,
-                  cursorWidth: 2,
-                  cursorRadius: const Radius.circular(1),
-                  onChanged: (text) {
-                    if (widget.onTextChanged != null) {
-                      widget.onTextChanged!(text);
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      child: Stack(
+        children: [
+          SingleChildScrollView(
+            controller: widget.scrollController,
+            child: RawKeyboardListener(
+              focusNode: FocusNode(),
+              onKey: (event) {
+                if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.tab) {
+                    final currentText = widget.controller.text;
+                    final selection = widget.controller.selection;
+                    final newText = currentText.replaceRange(
+                      selection.start,
+                      selection.end,
+                      '  ',
+                    );
+                    widget.controller.value = TextEditingValue(
+                      text: newText,
+                      selection: TextSelection.collapsed(
+                        offset: selection.baseOffset + 2,
+                      ),
+                    );
+                  } else if (event.logicalKey == LogicalKeyboardKey.enter) {
+                    final currentText = widget.controller.text;
+                    final selection = widget.controller.selection;
+                    
+                    // 获取当前行的缩进
+                    final textBeforeCursor = currentText.substring(0, selection.start);
+                    final lastNewLineIndex = textBeforeCursor.lastIndexOf('\n');
+                    final currentLine = lastNewLineIndex == -1
+                        ? textBeforeCursor
+                        : textBeforeCursor.substring(lastNewLineIndex + 1);
+                    
+                    // 计算缩进
+                    String indent = '';
+                    for (int i = 0; i < currentLine.length; i++) {
+                      if (currentLine[i] == ' ' || currentLine[i] == '\t') {
+                        indent += currentLine[i];
+                      } else {
+                        break;
+                      }
                     }
-                  },
+                    
+                    // 检查是否需要增加缩进（如果当前行以'{'结尾）
+                    if (currentLine.trim().endsWith('{')) {
+                      indent += '  ';
+                    }
+                    
+                    // 插入换行和缩进
+                    final newText = currentText.replaceRange(
+                      selection.start,
+                      selection.end,
+                      '\n$indent',
+                    );
+                    widget.controller.value = TextEditingValue(
+                      text: newText,
+                      selection: TextSelection.collapsed(
+                        offset: selection.baseOffset + indent.length + 1,
+                      ),
+                    );
+                  }
+                }
+              },
+              child: TextField(
+                controller: widget.controller,
+                focusNode: _focusNode,
+                style: TextStyle(
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 14,
+                  height: 1.5,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
                 ),
-              ],
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                maxLines: null,
+                readOnly: widget.readOnly,
+                onTap: _updateCursorPosition,
+                onTapOutside: (_) => _focusNode.unfocus(),
+                cursorColor: Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                onChanged: (value) {
+                  if (widget.onTextChanged != null) {
+                    widget.onTextChanged!(value);
+                  }
+                  _updateCursorPosition();
+                  _updateFoldingRegions();
+                },
+              ),
             ),
           ),
-        ),
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: _buildFoldingColumn(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _initializeFolding() {
+    // 分析代码并找出可折叠区域
+    _foldingManager.analyzeFoldingRegions(widget.controller.text, widget.language ?? 'text');
+  }
+
+  void _updateFolding() {
+    // 重新分析代码折叠区域
+    _foldingManager.analyzeFoldingRegions(widget.controller.text, widget.language ?? 'text');
+    setState(() {});
+  }
+
+  Widget _buildFoldingColumn() {
+    return SizedBox(
+      width: 12,
+      child: ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: widget.text.split('\n').length,
+        itemBuilder: (context, index) {
+          for (final region in _foldingManager.regions) {
+            if (region.startLine == index) {
+              return GestureDetector(
+                onTap: () => toggleFold(index),
+                child: Icon(
+                  region.isFolded ? Icons.chevron_right : Icons.expand_more,
+                  size: 12,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                ),
+              );
+            }
+          }
+          return const SizedBox(height: 21); // 行高
+        },
       ),
     );
   }
 }
 
-/// Math工具类
-class Math {
-  static int max(int a, int b) => a > b ? a : b;
-  static int min(int a, int b) => a < b ? a : b;
+class SyntaxHighlightPainter extends CustomPainter {
+  final String text;
+  final String language;
+  final Map<String, TextStyle> theme;
+  final TextStyle textStyle;
+
+  SyntaxHighlightPainter({
+    required this.text,
+    required this.language,
+    required this.theme,
+    required this.textStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        children: _buildHighlightedSpans(),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+
+    textPainter.layout(maxWidth: size.width);
+    textPainter.paint(canvas, Offset.zero);
+  }
+
+  List<TextSpan> _buildHighlightedSpans() {
+    final result = highlight.parse(text, language: language);
+    final nodes = result.nodes;
+
+    if (nodes == null) {
+      return [TextSpan(text: text, style: textStyle)];
+    }
+
+    return nodes.map((node) {
+      final style = theme[node.className] ?? textStyle;
+      return TextSpan(text: node.value, style: style);
+    }).toList();
+  }
+
+  @override
+  bool shouldRepaint(covariant SyntaxHighlightPainter oldDelegate) {
+    return text != oldDelegate.text ||
+           language != oldDelegate.language ||
+           theme != oldDelegate.theme ||
+           textStyle != oldDelegate.textStyle;
+  }
 } 

@@ -3,9 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite/sqflite.dart' hide DatabaseException;
 import 'package:mysql1/mysql1.dart' as mysql;
-import 'package:postgres/postgres.dart';
-import 'query_result.dart';
-import 'database_exception.dart';
+import 'package:postgres/postgres.dart' hide DatabaseException;
+import '../../models/database_config.dart';
+import '../../models/query_result.dart';
+import '../../exceptions/database_exception.dart';
 import '../core/logger_service.dart';
 import 'database_connection.dart';
 
@@ -106,6 +107,8 @@ class DatabaseService {
   final Map<String, DatabaseConnection> _connections = {};
   final Map<String, DatabaseConfig> _configs = {};
   final _logger = LoggerService();
+  DatabaseConfig? _config;
+  Connection? _connection;
   
   /// 获取数据库配置
   DatabaseConfig? getConfig(String name) {
@@ -129,64 +132,38 @@ class DatabaseService {
   }
   
   /// 连接数据库
-  Future<void> connect(String connectionName, DatabaseConfig config) async {
+  Future<void> connect(DatabaseConfig config) async {
     try {
-      final connection = await _createConnection(config);
-      _connections[connectionName] = connection;
+      _config = config;
+      final endpoint = Endpoint(
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        username: config.username,
+        password: config.password,
+      );
+      
+      _connection = await Connection.open(endpoint);
+      debugPrint('数据库连接成功');
     } catch (e) {
-      _logger.error('Failed to connect to database: ${e.toString()}');
-      rethrow;
+      throw DatabaseException('连接数据库失败: $e');
     }
   }
   
-  Future<DatabaseConnection> _createConnection(DatabaseConfig config) async {
-    switch (config.type) {
-      case DatabaseType.sqlite:
-        final db = await openDatabase(config.database);
-        return SqliteConnection(db, config);
-      case DatabaseType.mysql:
-        final conn = await mysql.MySqlConnection.connect(
-          mysql.ConnectionSettings(
-            host: config.host,
-            port: config.port,
-            user: config.username,
-            password: config.password,
-            db: config.database,
-          ),
-        );
-        return MySqlConnection(conn, config);
-      case DatabaseType.postgresql:
-        final conn = PostgreSQLConnection(
-          config.host,
-          config.port,
-          config.database,
-          username: config.username,
-          password: config.password,
-        );
-        await conn.open();
-        return PostgreSqlConnection(conn, config);
-      default:
-        throw UnsupportedError('Unsupported database type: ${config.type}');
-    }
-  }
-  
-  /// 执行SQL查询
-  Future<QueryResult> executeQuery(String connectionName, String query, [List<dynamic>? params]) async {
+  Future<QueryResult> executeQuery(String query) async {
     try {
-      final connection = _getConnection(connectionName);
-      return await connection.executeQuery(query, params);
+      if (_connection == null) {
+        throw DatabaseException('未连接到数据库');
+      }
+
+      final result = await _connection!.execute(query);
+      return QueryResult(
+        columnNames: result.columnDescriptions.map((col) => col.columnName).toList(),
+        rows: result.map((row) => row.toList()).toList(),
+      );
     } catch (e) {
-      _logger.error('Failed to execute query: ${e.toString()}');
-      rethrow;
+      throw DatabaseException('执行查询失败: $e');
     }
-  }
-  
-  DatabaseConnection _getConnection(String connectionName) {
-    final connection = _connections[connectionName];
-    if (connection == null) {
-      throw StateError('Connection $connectionName not found');
-    }
-    return connection;
   }
   
   /// 获取数据库模式信息
@@ -587,12 +564,12 @@ class DatabaseService {
 
   Future<void> disconnect(String connectionName) async {
     try {
-      final connection = _getConnection(connectionName);
-      await connection.disconnect();
-      _connections.remove(connectionName);
+      await _connection?.close();
+      _connection = null;
+      _config = null;
+      debugPrint('数据库连接已关闭');
     } catch (e) {
-      _logger.error('Failed to disconnect: ${e.toString()}');
-      rethrow;
+      throw DatabaseException('关闭数据库连接失败: $e');
     }
   }
 
@@ -601,9 +578,14 @@ class DatabaseService {
       await disconnect(connectionName);
     }
   }
+
+  bool get isConnected => _connection != null;
+  
+  DatabaseConfig? get currentConfig => _config;
 }
 
 /// 数据库服务提供者
 final databaseServiceProvider = Provider<DatabaseService>((ref) {
   return DatabaseService();
+}); 
 }); 

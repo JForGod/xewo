@@ -1,7 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/assistant_mode.dart';
 import '../models/assistant_state.dart';
+import '../../../../src/state/providers/shared_preferences_provider.dart';
 
 /// AI助手控制器
 class AssistantController extends StateNotifier<AssistantState> {

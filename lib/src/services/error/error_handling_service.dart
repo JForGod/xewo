@@ -4,10 +4,426 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
+import '../logging/logging_service.dart';
+
+/// 错误类型
+enum ErrorType {
+  /// 系统错误
+  system,
+  
+  /// 网络错误
+  network,
+  
+  /// 数据库错误
+  database,
+  
+  /// 文件错误
+  file,
+  
+  /// 权限错误
+  permission,
+  
+  /// 验证错误
+  validation,
+  
+  /// 业务错误
+  business,
+  
+  /// 未知错误
+  unknown,
+}
+
+/// 错误严重程度
+enum ErrorSeverity {
+  /// 低
+  low,
+  
+  /// 中
+  medium,
+  
+  /// 高
+  high,
+  
+  /// 严重
+  critical,
+}
+
+/// 错误信息
+class ErrorInfo {
+  /// 错误ID
+  final String id;
+  
+  /// 时间戳
+  final DateTime timestamp;
+  
+  /// 错误类型
+  final ErrorType type;
+  
+  /// 严重程度
+  final ErrorSeverity severity;
+  
+  /// 消息
+  final String message;
+  
+  /// 错误对象
+  final Object error;
+  
+  /// 堆栈跟踪
+  final StackTrace stackTrace;
+  
+  /// 标签
+  final Map<String, String> tags;
+  
+  /// 详细信息
+  final Map<String, dynamic> details;
+  
+  /// 是否已处理
+  final bool handled;
+  
+  /// 处理时间
+  final DateTime? handledAt;
+  
+  /// 处理结果
+  final String? handlingResult;
+  
+  /// 构造函数
+  ErrorInfo({
+    required this.id,
+    required this.timestamp,
+    required this.type,
+    required this.severity,
+    required this.message,
+    required this.error,
+    required this.stackTrace,
+    this.tags = const {},
+    this.details = const {},
+    this.handled = false,
+    this.handledAt,
+    this.handlingResult,
+  });
+  
+  /// 从Map创建错误信息
+  factory ErrorInfo.fromMap(Map<String, dynamic> map) {
+    return ErrorInfo(
+      id: map['id'] as String,
+      timestamp: DateTime.parse(map['timestamp'] as String),
+      type: ErrorType.values.byName(map['type'] as String),
+      severity: ErrorSeverity.values.byName(map['severity'] as String),
+      message: map['message'] as String,
+      error: map['error'] as Object,
+      stackTrace: StackTrace.fromString(map['stackTrace'] as String),
+      tags: Map<String, String>.from(map['tags'] ?? {}),
+      details: Map<String, dynamic>.from(map['details'] ?? {}),
+      handled: map['handled'] as bool? ?? false,
+      handledAt: map['handledAt'] != null
+          ? DateTime.parse(map['handledAt'] as String)
+          : null,
+      handlingResult: map['handlingResult'] as String?,
+    );
+  }
+  
+  /// 转换为Map
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'timestamp': timestamp.toIso8601String(),
+      'type': type.name,
+      'severity': severity.name,
+      'message': message,
+      'error': error.toString(),
+      'stackTrace': stackTrace.toString(),
+      'tags': tags,
+      'details': details,
+      'handled': handled,
+      'handledAt': handledAt?.toIso8601String(),
+      'handlingResult': handlingResult,
+    };
+  }
+}
+
+/// 错误处理配置
+class ErrorHandlingConfig {
+  /// 是否启用错误处理
+  final bool enabled;
+  
+  /// 是否记录错误
+  final bool logErrors;
+  
+  /// 是否发送错误报告
+  final bool sendErrorReports;
+  
+  /// 是否显示错误通知
+  final bool showErrorNotifications;
+  
+  /// 是否自动重试
+  final bool autoRetry;
+  
+  /// 最大重试次数
+  final int maxRetries;
+  
+  /// 重试延迟（毫秒）
+  final int retryDelay;
+  
+  /// 错误保留天数
+  final int retentionDays;
+  
+  /// 构造函数
+  ErrorHandlingConfig({
+    this.enabled = true,
+    this.logErrors = true,
+    this.sendErrorReports = true,
+    this.showErrorNotifications = true,
+    this.autoRetry = true,
+    this.maxRetries = 3,
+    this.retryDelay = 1000,
+    this.retentionDays = 30,
+  });
+  
+  /// 从Map创建配置
+  factory ErrorHandlingConfig.fromMap(Map<String, dynamic> map) {
+    return ErrorHandlingConfig(
+      enabled: map['enabled'] ?? true,
+      logErrors: map['logErrors'] ?? true,
+      sendErrorReports: map['sendErrorReports'] ?? true,
+      showErrorNotifications: map['showErrorNotifications'] ?? true,
+      autoRetry: map['autoRetry'] ?? true,
+      maxRetries: map['maxRetries'] ?? 3,
+      retryDelay: map['retryDelay'] ?? 1000,
+      retentionDays: map['retentionDays'] ?? 30,
+    );
+  }
+  
+  /// 转换为Map
+  Map<String, dynamic> toMap() {
+    return {
+      'enabled': enabled,
+      'logErrors': logErrors,
+      'sendErrorReports': sendErrorReports,
+      'showErrorNotifications': showErrorNotifications,
+      'autoRetry': autoRetry,
+      'maxRetries': maxRetries,
+      'retryDelay': retryDelay,
+      'retentionDays': retentionDays,
+    };
+  }
+}
+
+/// 错误处理服务
+class ErrorHandlingService {
+  /// 配置
+  ErrorHandlingConfig _config;
+  
+  /// 错误信息映射
+  final Map<String, ErrorInfo> _errors = {};
+  
+  /// 错误变更流控制器
+  final StreamController<ErrorInfo> _errorController =
+      StreamController<ErrorInfo>.broadcast();
+  
+  /// 错误变更流
+  Stream<ErrorInfo> get errorStream => _errorController.stream;
+  
+  /// 构造函数
+  ErrorHandlingService({
+    ErrorHandlingConfig? config,
+  }) : _config = config ?? ErrorHandlingConfig() {
+    _initializeService();
+  }
+  
+  /// 初始化服务
+  void _initializeService() {
+    // 清理旧错误
+    _cleanupOldErrors();
+  }
+  
+  /// 清理旧错误
+  void _cleanupOldErrors() {
+    final now = DateTime.now();
+    final cutoffDate = now.subtract(Duration(days: _config.retentionDays));
+    
+    _errors.removeWhere((_, error) => error.timestamp.isBefore(cutoffDate));
+  }
+  
+  /// 生成错误ID
+  String _generateId() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final random = DateTime.now().microsecondsSinceEpoch;
+    return '$now$random';
+  }
+  
+  /// 处理错误
+  Future<void> handleError(
+    Object error,
+    StackTrace stackTrace, {
+    ErrorType type = ErrorType.unknown,
+    ErrorSeverity severity = ErrorSeverity.medium,
+    String? message,
+    Map<String, String> tags = const {},
+    Map<String, dynamic> details = const {},
+  }) async {
+    if (!_config.enabled) {
+      return;
+    }
+    
+    try {
+      // 创建错误信息
+      final errorInfo = ErrorInfo(
+        id: _generateId(),
+        timestamp: DateTime.now(),
+        type: type,
+        severity: severity,
+        message: message ?? error.toString(),
+        error: error,
+        stackTrace: stackTrace,
+        tags: tags,
+        details: details,
+      );
+      
+      // 保存错误信息
+      _errors[errorInfo.id] = errorInfo;
+      
+      // 发送到流
+      _errorController.add(errorInfo);
+      
+      // 记录错误
+      if (_config.logErrors) {
+        _logError(errorInfo);
+      }
+      
+      // 发送错误报告
+      if (_config.sendErrorReports) {
+        await _sendErrorReport(errorInfo);
+      }
+      
+      // 显示错误通知
+      if (_config.showErrorNotifications) {
+        _showErrorNotification(errorInfo);
+      }
+      
+      // 自动重试
+      if (_config.autoRetry) {
+        await _retryOperation(errorInfo);
+      }
+    } catch (e, s) {
+      print('错误处理失败: $e\n$s');
+    }
+  }
+  
+  /// 记录错误
+  void _logError(ErrorInfo errorInfo) {
+    // TODO: 实现错误日志记录
+  }
+  
+  /// 发送错误报告
+  Future<void> _sendErrorReport(ErrorInfo errorInfo) async {
+    // TODO: 实现错误报告发送
+  }
+  
+  /// 显示错误通知
+  void _showErrorNotification(ErrorInfo errorInfo) {
+    // TODO: 实现错误通知显示
+  }
+  
+  /// 重试操作
+  Future<void> _retryOperation(ErrorInfo errorInfo) async {
+    // TODO: 实现操作重试
+  }
+  
+  /// 标记错误为已处理
+  Future<void> markErrorAsHandled(
+    String errorId, {
+    String? handlingResult,
+  }) async {
+    final errorInfo = _errors[errorId];
+    if (errorInfo == null) {
+      return;
+    }
+    
+    // 更新错误信息
+    final updatedErrorInfo = ErrorInfo(
+      id: errorInfo.id,
+      timestamp: errorInfo.timestamp,
+      type: errorInfo.type,
+      severity: errorInfo.severity,
+      message: errorInfo.message,
+      error: errorInfo.error,
+      stackTrace: errorInfo.stackTrace,
+      tags: errorInfo.tags,
+      details: errorInfo.details,
+      handled: true,
+      handledAt: DateTime.now(),
+      handlingResult: handlingResult,
+    );
+    
+    // 保存错误信息
+    _errors[errorId] = updatedErrorInfo;
+    
+    // 发送到流
+    _errorController.add(updatedErrorInfo);
+  }
+  
+  /// 获取错误信息
+  ErrorInfo? getError(String errorId) {
+    return _errors[errorId];
+  }
+  
+  /// 获取所有错误
+  List<ErrorInfo> getAllErrors() {
+    return List.unmodifiable(_errors.values);
+  }
+  
+  /// 获取未处理的错误
+  List<ErrorInfo> getUnhandledErrors() {
+    return _errors.values.where((error) => !error.handled).toList();
+  }
+  
+  /// 获取特定类型的错误
+  List<ErrorInfo> getErrorsByType(ErrorType type) {
+    return _errors.values.where((error) => error.type == type).toList();
+  }
+  
+  /// 获取特定严重程度的错误
+  List<ErrorInfo> getErrorsBySeverity(ErrorSeverity severity) {
+    return _errors.values.where((error) => error.severity == severity).toList();
+  }
+  
+  /// 清理错误
+  void clearErrors() {
+    _errors.clear();
+  }
+  
+  /// 更新配置
+  void updateConfig(ErrorHandlingConfig config) {
+    _config = config;
+    _initializeService();
+  }
+  
+  /// 获取当前配置
+  ErrorHandlingConfig getConfig() {
+    return _config;
+  }
+  
+  /// 关闭服务
+  Future<void> dispose() async {
+    await _errorController.close();
+  }
+}
 
 /// 错误处理服务提供者
 final errorHandlingServiceProvider = Provider<ErrorHandlingService>((ref) {
-  throw UnimplementedError('errorHandlingServiceProvider 未初始化');
+  final service = ErrorHandlingService();
+  
+  ref.onDispose(() {
+    service.dispose();
+  });
+  
+  return service;
+});
+
+/// 错误变更流提供者
+final errorStreamProvider = StreamProvider<ErrorInfo>((ref) {
+  final service = ref.watch(errorHandlingServiceProvider);
+  return service.errorStream;
 });
 
 /// 错误严重程度级别

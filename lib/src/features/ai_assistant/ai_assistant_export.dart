@@ -1,0 +1,17 @@
+// 导出主要类以供应用使用
+export 'presentation/ai_assistant.dart';
+export 'presentation/widgets/assistant_container.dart';
+export 'presentation/widgets/floating_assistant.dart';
+export 'presentation/widgets/activation_widgets.dart';
+export 'presentation/widgets/multimodal_controls.dart';
+export 'presentation/widgets/mode_switcher.dart';
+export 'presentation/pages/guardian_mode_page.dart';
+export 'presentation/pages/standard_mode_page.dart';
+export 'presentation/pages/pro_mode_page.dart';
+export 'presentation/pages/ai_assistant_entry.dart';
+export 'presentation/pages/mode_settings_page.dart';
+export 'presentation/themes/app_theme.dart';
+export 'presentation/themes/guardian_theme.dart';
+export 'presentation/themes/standard_theme.dart';
+export 'presentation/themes/pro_theme.dart';
+export 'presentation/themes/animations.dart';

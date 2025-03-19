@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../screens/main_screen.dart';
 import '../../themes/app_theme.dart';
+import '../../../providers/navigation_provider.dart';
 
 class NavItem extends ConsumerWidget {
   final IconData icon;
@@ -30,7 +30,7 @@ class NavItem extends ConsumerWidget {
           vertical: AppTheme.spacingSm,
         ),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary50 : Colors.transparent,
+          color: isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         margin: const EdgeInsets.symmetric(
@@ -41,7 +41,7 @@ class NavItem extends ConsumerWidget {
           children: [
             Icon(
               icon,
-              color: isSelected ? AppTheme.primary600 : AppTheme.neutral600,
+              color: isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
               size: 20,
             ),
             const SizedBox(width: AppTheme.spacingSm),
@@ -49,7 +49,7 @@ class NavItem extends ConsumerWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  color: isSelected ? AppTheme.primary600 : AppTheme.neutral600,
+                  color: isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,

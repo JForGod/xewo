@@ -151,14 +151,14 @@ class JavaScriptParser extends LanguageParser {
           id: 'import_${DateTime.now().millisecondsSinceEpoch}',
           type: ContextType.import,
           name: importPath,
-          range: ContextRange(
+        range: ContextRange(
             start: match.start,
             end: match.end,
             line: _getLineNumber(code, match.start),
             column: _getColumnNumber(code, match.start),
           ),
-          analyzedAt: DateTime.now(),
-        ));
+        analyzedAt: DateTime.now(),
+      ));
       }
     }
     
@@ -171,14 +171,14 @@ class JavaScriptParser extends LanguageParser {
           id: 'import_${DateTime.now().millisecondsSinceEpoch}',
           type: ContextType.import,
           name: importPath,
-          range: ContextRange(
+        range: ContextRange(
             start: match.start,
             end: match.end,
             line: _getLineNumber(code, match.start),
             column: _getColumnNumber(code, match.start),
           ),
-          analyzedAt: DateTime.now(),
-        ));
+        analyzedAt: DateTime.now(),
+      ));
       }
     }
     

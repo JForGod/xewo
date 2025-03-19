@@ -1,112 +1,254 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/editor/controllers/multi_cursor_controller.dart';
 import '../../../services/editor/multi_cursor_service.dart';
 import '../../../services/editor/history_service.dart';
 
 /// 多光标编辑器组件
-class MultiCursorEditor extends StatefulWidget {
-  final TextEditingController? controller;
-  final FocusNode? focusNode;
-  final ScrollController? scrollController;
-  final TextStyle? style;
-  final InputDecoration? decoration;
-  final TextInputType? keyboardType;
-  final int? maxLines;
-  final bool expands;
-  final bool enableSuggestions;
-  final bool autocorrect;
-  final bool enableIMEPersonalizedLearning;
-  final Color? cursorColor;
-  final double cursorWidth;
-  final Radius? cursorRadius;
-  final TextSelectionControls? selectionControls;
-  final Widget Function(BuildContext, EditableTextState)? contextMenuBuilder;
-  final EdgeInsetsGeometry? padding;
-  final ValueChanged<String>? onChanged;
-  final GestureTapCallback? onTap;
-
+class MultiCursorEditor extends ConsumerStatefulWidget {
+  final String text;
+  final double fontSize;
+  final double lineHeight;
+  final Function(String) onChanged;
+  
   const MultiCursorEditor({
-    Key? key,
-    this.controller,
-    this.focusNode,
-    this.scrollController,
-    this.style,
-    this.decoration,
-    this.keyboardType,
-    this.maxLines,
-    this.expands = false,
-    this.enableSuggestions = true,
-    this.autocorrect = true,
-    this.enableIMEPersonalizedLearning = true,
-    this.cursorColor,
-    this.cursorWidth = 2.0,
-    this.cursorRadius,
-    this.selectionControls,
-    this.contextMenuBuilder,
-    this.padding,
-    this.onChanged,
-    this.onTap,
-  }) : super(key: key);
-
+    super.key,
+    required this.text,
+    this.fontSize = 14.0,
+    this.lineHeight = 20.0,
+    required this.onChanged,
+  });
+  
   @override
-  State<MultiCursorEditor> createState() => _MultiCursorEditorState();
+  ConsumerState<MultiCursorEditor> createState() => _MultiCursorEditorState();
 }
 
-class _MultiCursorEditorState extends State<MultiCursorEditor> {
+class _MultiCursorEditorState extends ConsumerState<MultiCursorEditor> {
   late TextEditingController _controller;
-  late FocusNode _focusNode;
   late ScrollController _scrollController;
-  List<TextSelection> _selections = [];
-  TextSelection? _primarySelection;
-
+  late FocusNode _focusNode;
+  String _lastText = '';
+  bool _isUndoRedoOperation = false;
+  
   @override
   void initState() {
     super.initState();
-    _controller = widget.controller ?? TextEditingController();
-    _focusNode = widget.focusNode ?? FocusNode();
-    _scrollController = widget.scrollController ?? ScrollController();
+    _controller = TextEditingController(text: widget.text);
+    _scrollController = ScrollController();
+    _lastText = widget.text;
+    
+    _controller.addListener(_handleTextChange);
   }
-
-  @override
-  void dispose() {
-    if (widget.controller == null) {
-      _controller.dispose();
+  
+  void _handleTextChange() {
+    if (_controller.text != _lastText && !_isUndoRedoOperation) {
+      final historyService = ref.read(historyServiceProvider);
+      final cursorController = ref.read(multiCursorControllerProvider);
+      
+      // 记录编辑操作
+      historyService.addOperation(EditOperation(
+        oldText: _lastText,
+        newText: _controller.text,
+        cursorPosition: _controller.selection.baseOffset,
+        selections: cursorController.selections
+            .map((s) => s.start.offset)
+            .toList(),
+      ));
+      
+      widget.onChanged(_controller.text);
+      _lastText = _controller.text;
     }
-    if (widget.focusNode == null) {
-      _focusNode.dispose();
-    }
-    if (widget.scrollController == null) {
-      _scrollController.dispose();
-    }
-    super.dispose();
   }
-
+  
+  void _handleUndo() {
+    final historyService = ref.read(historyServiceProvider);
+    final operation = historyService.undo();
+    
+    if (operation != null) {
+      _isUndoRedoOperation = true;
+      _controller.text = operation.oldText;
+      _controller.selection = TextSelection.collapsed(
+        offset: operation.cursorPosition,
+      );
+      _isUndoRedoOperation = false;
+      _lastText = operation.oldText;
+      
+      // 恢复选择区域
+      final cursorController = ref.read(multiCursorControllerProvider);
+      cursorController.clearSelections();
+      for (final offset in operation.selections) {
+        cursorController.addSelection(SelectionRange(
+          start: CursorPosition(
+            offset: offset,
+            line: 0, // TODO: 计算正确的行号
+            column: 0, // TODO: 计算正确的列号
+          ),
+          end: CursorPosition(
+            offset: offset,
+            line: 0,
+            column: 0,
+          ),
+        ));
+      }
+    }
+  }
+  
+  void _handleRedo() {
+    final historyService = ref.read(historyServiceProvider);
+    final operation = historyService.redo();
+    
+    if (operation != null) {
+      _isUndoRedoOperation = true;
+      _controller.text = operation.newText;
+      _controller.selection = TextSelection.collapsed(
+        offset: operation.cursorPosition,
+      );
+      _isUndoRedoOperation = false;
+      _lastText = operation.newText;
+      
+      // 恢复选择区域
+      final cursorController = ref.read(multiCursorControllerProvider);
+      cursorController.clearSelections();
+      for (final offset in operation.selections) {
+        cursorController.addSelection(SelectionRange(
+          start: CursorPosition(
+            offset: offset,
+            line: 0, // TODO: 计算正确的行号
+            column: 0, // TODO: 计算正确的列号
+          ),
+          end: CursorPosition(
+            offset: offset,
+            line: 0,
+            column: 0,
+          ),
+        ));
+      }
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: widget.padding ?? EdgeInsets.zero,
-      child: TextField(
-        controller: _controller,
-        focusNode: _focusNode,
-        scrollController: _scrollController,
-        style: widget.style,
-        decoration: widget.decoration,
-        keyboardType: widget.keyboardType,
-        maxLines: widget.maxLines,
-        expands: widget.expands,
-        enableSuggestions: widget.enableSuggestions,
-        autocorrect: widget.autocorrect,
-        enableIMEPersonalizedLearning: widget.enableIMEPersonalizedLearning,
-        cursorColor: widget.cursorColor,
-        cursorWidth: widget.cursorWidth,
-        cursorRadius: widget.cursorRadius,
-        selectionControls: widget.selectionControls,
-        contextMenuBuilder: widget.contextMenuBuilder,
-        onChanged: widget.onChanged,
-        onTap: widget.onTap,
+    final cursorController = ref.watch(multiCursorControllerProvider);
+    final padding = const EdgeInsets.all(8);
+    
+    return GestureDetector(
+      onPanDown: (details) {
+        _focusNode.requestFocus();
+        cursorController.handleMouseDown(
+          _controller.text,
+          details.localPosition,
+          widget.fontSize,
+          widget.lineHeight,
+          _scrollController.hasClients ? _scrollController.offset : 0,
+          padding,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kSecondaryMouseButton,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kMiddleMouseButton,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kPrimaryMouseButton,
+        );
+      },
+      onPanUpdate: (details) {
+        cursorController.handleMouseMove(
+          _controller.text,
+          details.localPosition,
+          widget.fontSize,
+          widget.lineHeight,
+          _scrollController.hasClients ? _scrollController.offset : 0,
+          padding,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kSecondaryMouseButton,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kMiddleMouseButton,
+          details.kind == PointerDeviceKind.mouse && details.buttons == kPrimaryMouseButton,
+        );
+      },
+      onPanEnd: (details) {
+        cursorController.handleMouseUp();
+      },
+      onDoubleTapDown: (details) {
+        cursorController.handleDoubleClick(
+          _controller.text,
+          details.localPosition,
+          widget.fontSize,
+          widget.lineHeight,
+          _scrollController.hasClients ? _scrollController.offset : 0,
+          padding,
+        );
+      },
+      onTripleTapDown: (details) {
+        cursorController.handleTripleClick(
+          _controller.text,
+          details.localPosition,
+          widget.fontSize,
+          widget.lineHeight,
+          _scrollController.hasClients ? _scrollController.offset : 0,
+          padding,
+        );
+      },
+      child: Stack(
+        children: [
+          // 编辑器背景
+          Container(
+            color: Theme.of(context).colorScheme.surface,
+          ),
+          
+          // 文本编辑器
+          SingleChildScrollView(
+            controller: _scrollController,
+            child: Padding(
+              padding: padding,
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width - 50, // 提供有限宽度约束
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  style: TextStyle(
+                    fontFamily: 'JetBrains Mono',
+                    fontSize: widget.fontSize,
+                    height: widget.lineHeight / widget.fontSize,
+                  ),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                  ),
+                  maxLines: null,
+                  onChanged: widget.onChanged,
+                ),
+              ),
+            ),
+          ),
+          
+          // 光标和选择区域
+          RepaintBoundary(
+            child: CustomPaint(
+              painter: _MultiCursorPainter(
+                text: _controller.text,
+                selections: cursorController.selections,
+                primarySelection: cursorController.primarySelection,
+                fontSize: widget.fontSize,
+                lineHeight: widget.lineHeight,
+                scrollOffset: _scrollController.hasClients ? _scrollController.offset : 0,
+                padding: padding,
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+  
+  @override
+  void dispose() {
+    // 先移除监听器，再释放资源
+    _controller.removeListener(_handleTextChange);
+    _controller.dispose();
+    
+    // 确保ScrollController正确释放
+    if (_scrollController.hasClients) {
+      _scrollController.removeListener(() {});
+    }
+    _scrollController.dispose();
+    
+    // 确保FocusNode正确释放
+    _focusNode.dispose();
+    
+    super.dispose();
   }
 }
 

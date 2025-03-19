@@ -5,230 +5,80 @@ import '../../../../state/providers/shortcut_provider.dart';
 import '../../../../state/models/shortcut_model.dart';
 
 /// 快捷键设置对话框
-class ShortcutSettingsDialog extends ConsumerWidget {
-  const ShortcutSettingsDialog({Key? key}) : super(key: key);
+class ShortcutSettingsDialog extends ConsumerStatefulWidget {
+  const ShortcutSettingsDialog({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final shortcuts = ref.watch(shortcutProvider);
-    final notifier = ref.read(shortcutProvider.notifier);
-    final theme = Theme.of(context);
+  ConsumerState<ShortcutSettingsDialog> createState() => _ShortcutSettingsDialogState();
+}
+
+class _ShortcutSettingsDialogState extends ConsumerState<ShortcutSettingsDialog> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  String? _selectedShortcutId;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: ShortcutCategory.values.length, vsync: this);
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final shortcutState = ref.watch(shortcutProvider);
     
     return AlertDialog(
       title: const Text('快捷键设置'),
       content: SizedBox(
-        width: 500,
-        height: 500,
+        width: 600,
+        height: 400,
         child: Column(
           children: [
-            // 搜索框
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: TextField(
-                decoration: const InputDecoration(
-                  labelText: '搜索快捷键',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onChanged: (value) {
-                  // 搜索功能
-                },
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: '搜索',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
               ),
             ),
-            
-            // 快捷键列表
+            const SizedBox(height: 16),
+            TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabs: ShortcutCategory.values.map((category) {
+                return Tab(text: _getCategoryName(category));
+              }).toList(),
+            ),
             Expanded(
-              child: ListView(
-                children: [
-                  _buildShortcutCategory(
-                    context,
-                    title: '文件操作',
-                    shortcuts: [
-                      _buildShortcutItem(
-                        context,
-                        label: '新建文件',
-                        shortcut: 'Ctrl+N',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '新建文件', 'Ctrl+N');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '打开文件',
-                        shortcut: 'Ctrl+O',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '打开文件', 'Ctrl+O');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '保存文件',
-                        shortcut: 'Ctrl+S',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '保存文件', 'Ctrl+S');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '另存为',
-                        shortcut: 'Ctrl+Shift+S',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '另存为', 'Ctrl+Shift+S');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '关闭文件',
-                        shortcut: 'Ctrl+W',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '关闭文件', 'Ctrl+W');
-                        },
-                      ),
-                    ],
-                  ),
-                  
-                  _buildShortcutCategory(
-                    context,
-                    title: '编辑操作',
-                    shortcuts: [
-                      _buildShortcutItem(
-                        context,
-                        label: '撤销',
-                        shortcut: 'Ctrl+Z',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '撤销', 'Ctrl+Z');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '重做',
-                        shortcut: 'Ctrl+Y',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '重做', 'Ctrl+Y');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '剪切',
-                        shortcut: 'Ctrl+X',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '剪切', 'Ctrl+X');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '复制',
-                        shortcut: 'Ctrl+C',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '复制', 'Ctrl+C');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '粘贴',
-                        shortcut: 'Ctrl+V',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '粘贴', 'Ctrl+V');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '查找',
-                        shortcut: 'Ctrl+F',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '查找', 'Ctrl+F');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '替换',
-                        shortcut: 'Ctrl+H',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '替换', 'Ctrl+H');
-                        },
-                      ),
-                    ],
-                  ),
-                  
-                  _buildShortcutCategory(
-                    context,
-                    title: '代码操作',
-                    shortcuts: [
-                      _buildShortcutItem(
-                        context,
-                        label: '格式化代码',
-                        shortcut: 'Ctrl+Shift+F',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '格式化代码', 'Ctrl+Shift+F');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '注释/取消注释',
-                        shortcut: 'Ctrl+/',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '注释/取消注释', 'Ctrl+/');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '缩进',
-                        shortcut: 'Tab',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '缩进', 'Tab');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '取消缩进',
-                        shortcut: 'Shift+Tab',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '取消缩进', 'Shift+Tab');
-                        },
-                      ),
-                    ],
-                  ),
-                  
-                  _buildShortcutCategory(
-                    context,
-                    title: '视图操作',
-                    shortcuts: [
-                      _buildShortcutItem(
-                        context,
-                        label: '放大',
-                        shortcut: 'Ctrl++',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '放大', 'Ctrl++');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '缩小',
-                        shortcut: 'Ctrl+-',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '缩小', 'Ctrl+-');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '重置缩放',
-                        shortcut: 'Ctrl+0',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '重置缩放', 'Ctrl+0');
-                        },
-                      ),
-                      _buildShortcutItem(
-                        context,
-                        label: '切换全屏',
-                        shortcut: 'F11',
-                        onPressed: () {
-                          _showShortcutEditDialog(context, '切换全屏', 'F11');
-                        },
-                      ),
-                    ],
-                  ),
-                ],
+              child: TabBarView(
+                controller: _tabController,
+                children: ShortcutCategory.values.map((category) {
+                  return _buildShortcutList(
+                    shortcutState.shortcuts.where((s) {
+                      if (_searchQuery.isEmpty) {
+                        return s.category == category;
+                      } else {
+                        return s.category == category && 
+                               (s.name.toLowerCase().contains(_searchQuery) || 
+                                s.description.toLowerCase().contains(_searchQuery));
+                      }
+                    }).toList(),
+                  );
+                }).toList(),
               ),
             ),
           ],
@@ -237,10 +87,9 @@ class ShortcutSettingsDialog extends ConsumerWidget {
       actions: [
         TextButton(
           onPressed: () {
-            // 重置所有快捷键
-            _showResetConfirmDialog(context);
+            ref.read(shortcutProvider.notifier).resetAllShortcuts();
           },
-          child: const Text('重置所有快捷键'),
+          child: const Text('重置所有'),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context),
@@ -250,212 +99,254 @@ class ShortcutSettingsDialog extends ConsumerWidget {
     );
   }
   
-  // 构建快捷键分类
-  Widget _buildShortcutCategory(
-    BuildContext context, {
-    required String title,
-    required List<Widget> shortcuts,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
-        ),
-        const Divider(),
-        ...shortcuts,
-      ],
-    );
-  }
-  
-  // 构建快捷键项
-  Widget _buildShortcutItem(
-    BuildContext context, {
-    required String label,
-    required String shortcut,
-    required VoidCallback onPressed,
-  }) {
-    return ListTile(
-      title: Text(label),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              shortcut,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontFamily: 'monospace',
-                fontSize: 12,
+  Widget _buildShortcutList(List<ShortcutModel> shortcuts) {
+    if (shortcuts.isEmpty) {
+      return const Center(
+        child: Text('没有找到快捷键'),
+      );
+    }
+    
+    return ListView.builder(
+      itemCount: shortcuts.length,
+      itemBuilder: (context, index) {
+        final shortcut = shortcuts[index];
+        return ListTile(
+          title: Text(shortcut.name),
+          subtitle: Text(shortcut.description),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedShortcutId = shortcut.id;
+                  });
+                  _showKeyRecordDialog(shortcut);
+                },
+                child: Text(
+                  shortcut.customKeys ?? shortcut.defaultKeys,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: shortcut.customKeys != null ? Colors.blue : null,
+                  ),
+                ),
               ),
-            ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: '重置为默认',
+                onPressed: () {
+                  ref.read(shortcutProvider.notifier).resetShortcut(shortcut.id);
+                },
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.edit, size: 16),
-            onPressed: onPressed,
-            tooltip: '编辑快捷键',
-          ),
-        ],
-      ),
-      dense: true,
-      onTap: onPressed,
+          selected: _selectedShortcutId == shortcut.id,
+          onTap: () {
+            setState(() {
+              _selectedShortcutId = shortcut.id;
+            });
+          },
+        );
+      },
     );
   }
   
-  // 显示快捷键编辑对话框
-  void _showShortcutEditDialog(BuildContext context, String action, String currentShortcut) {
+  void _showKeyRecordDialog(ShortcutModel shortcut) {
     showDialog(
       context: context,
-      builder: (context) => _ShortcutEditDialog(
-        action: action,
-        currentShortcut: currentShortcut,
-        onSave: (newShortcut) {
-          // 保存新的快捷键
+      builder: (context) => KeyRecordDialog(
+        shortcut: shortcut,
+        onSave: (keys) {
+          ref.read(shortcutProvider.notifier).updateShortcut(shortcut.id, keys);
           Navigator.pop(context);
         },
       ),
     );
   }
   
-  // 显示重置确认对话框
-  void _showResetConfirmDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重置所有快捷键'),
-        content: const Text('确定要将所有快捷键重置为默认值吗？此操作无法撤销。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              // 重置所有快捷键
-              Navigator.pop(context);
-            },
-            child: const Text('重置'),
-          ),
-        ],
-      ),
-    );
+  String _getCategoryName(ShortcutCategory category) {
+    switch (category) {
+      case ShortcutCategory.file:
+        return '文件';
+      case ShortcutCategory.edit:
+        return '编辑';
+      case ShortcutCategory.view:
+        return '视图';
+      case ShortcutCategory.search:
+        return '搜索';
+      case ShortcutCategory.debug:
+        return '调试';
+      case ShortcutCategory.tool:
+        return '工具';
+      case ShortcutCategory.other:
+        return '其他';
+    }
+  }
+
+  String _getKeyboardEventDescription(KeyDownEvent event) {
+    final List<String> modifiers = [];
+    
+    if (event.logicalKey == LogicalKeyboardKey.control || 
+        event.logicalKey == LogicalKeyboardKey.controlLeft || 
+        event.logicalKey == LogicalKeyboardKey.controlRight) {
+      modifiers.add('Ctrl');
+    }
+    if (event.logicalKey == LogicalKeyboardKey.alt || 
+        event.logicalKey == LogicalKeyboardKey.altLeft || 
+        event.logicalKey == LogicalKeyboardKey.altRight) {
+      modifiers.add('Alt');
+    }
+    if (event.logicalKey == LogicalKeyboardKey.shift || 
+        event.logicalKey == LogicalKeyboardKey.shiftLeft || 
+        event.logicalKey == LogicalKeyboardKey.shiftRight) {
+      modifiers.add('Shift');
+    }
+    if (event.logicalKey == LogicalKeyboardKey.meta || 
+        event.logicalKey == LogicalKeyboardKey.metaLeft || 
+        event.logicalKey == LogicalKeyboardKey.metaRight) {
+      modifiers.add('Meta');
+    }
+    
+    // 获取按键名称
+    final keyLabel = event.logicalKey.keyLabel.toLowerCase();
+    if (!['control', 'alt', 'shift', 'meta', 'command', 'windows'].contains(keyLabel)) {
+      modifiers.add(keyLabel);
+    }
+    
+    return modifiers.join('+');
   }
 }
 
-/// 快捷键编辑对话框
-class _ShortcutEditDialog extends StatefulWidget {
-  final String action;
-  final String currentShortcut;
+/// 按键记录对话框
+class KeyRecordDialog extends StatefulWidget {
+  final ShortcutModel shortcut;
   final Function(String) onSave;
-
-  const _ShortcutEditDialog({
-    Key? key,
-    required this.action,
-    required this.currentShortcut,
+  
+  const KeyRecordDialog({
+    super.key,
+    required this.shortcut,
     required this.onSave,
-  }) : super(key: key);
-
+  });
+  
   @override
-  State<_ShortcutEditDialog> createState() => _ShortcutEditDialogState();
+  State<KeyRecordDialog> createState() => _KeyRecordDialogState();
 }
 
-class _ShortcutEditDialogState extends State<_ShortcutEditDialog> {
-  String _newShortcut = '';
-  bool _isRecording = false;
+class _KeyRecordDialogState extends State<KeyRecordDialog> {
+  bool _ctrl = false;
+  bool _alt = false;
+  bool _shift = false;
+  bool _meta = false;
+  String _key = '';
   
   @override
   void initState() {
     super.initState();
-    _newShortcut = widget.currentShortcut;
+    _parseShortcut(widget.shortcut.customKeys ?? widget.shortcut.defaultKeys);
+  }
+  
+  void _parseShortcut(String shortcut) {
+    final parts = shortcut.toLowerCase().split('+');
+    
+    setState(() {
+      _ctrl = parts.contains('ctrl');
+      _alt = parts.contains('alt');
+      _shift = parts.contains('shift');
+      _meta = parts.contains('meta') || parts.contains('cmd') || parts.contains('win');
+      
+      // 获取最后一个部分作为键
+      for (final part in parts) {
+        if (!['ctrl', 'alt', 'shift', 'meta', 'cmd', 'win'].contains(part)) {
+          _key = part;
+          break;
+        }
+      }
+    });
+  }
+  
+  String _buildShortcutString() {
+    final parts = <String>[];
+    
+    if (_ctrl) parts.add('ctrl');
+    if (_alt) parts.add('alt');
+    if (_shift) parts.add('shift');
+    if (_meta) parts.add('meta');
+    
+    if (_key.isNotEmpty) {
+      parts.add(_key);
+    }
+    
+    return parts.join('+');
   }
   
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('编辑快捷键: ${widget.action}'),
+      title: Text('设置快捷键: ${widget.shortcut.name}'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('当前快捷键: ${widget.currentShortcut}'),
+          Text('当前快捷键: ${_buildShortcutString()}'),
           const SizedBox(height: 16),
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _isRecording = true;
-              });
-              FocusScope.of(context).requestFocus(FocusNode());
+          const Text('按下新的快捷键组合'),
+          const SizedBox(height: 16),
+          Focus(
+            autofocus: true,
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent) {
+                setState(() {
+                  _ctrl = event.logicalKey == LogicalKeyboardKey.control || 
+                          event.logicalKey == LogicalKeyboardKey.controlLeft || 
+                          event.logicalKey == LogicalKeyboardKey.controlRight;
+                  _alt = event.logicalKey == LogicalKeyboardKey.alt || 
+                         event.logicalKey == LogicalKeyboardKey.altLeft || 
+                         event.logicalKey == LogicalKeyboardKey.altRight;
+                  _shift = event.logicalKey == LogicalKeyboardKey.shift || 
+                           event.logicalKey == LogicalKeyboardKey.shiftLeft || 
+                           event.logicalKey == LogicalKeyboardKey.shiftRight;
+                  _meta = event.logicalKey == LogicalKeyboardKey.meta || 
+                          event.logicalKey == LogicalKeyboardKey.metaLeft || 
+                          event.logicalKey == LogicalKeyboardKey.metaRight;
+                  
+                  // 获取按键名称
+                  final keyLabel = event.logicalKey.keyLabel.toLowerCase();
+                  if (!['control', 'alt', 'shift', 'meta', 'command', 'windows'].contains(keyLabel)) {
+                    _key = keyLabel;
+                  }
+                });
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
             },
             child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              width: 300,
+              height: 100,
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: _isRecording
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).dividerColor,
-                ),
-                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(
-                _isRecording ? '按下快捷键组合...' : (_newShortcut.isEmpty ? '点击此处录制新快捷键' : _newShortcut),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _isRecording
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
+              child: Center(
+                child: Text(
+                  '按下键盘快捷键',
+                  style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
             ),
           ),
-          if (_isRecording)
-            const Padding(
-              padding: EdgeInsets.only(top: 8.0),
-              child: Text(
-                '按下键盘上的按键组合，完成后点击保存',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: () {
-            // 清除快捷键
-            setState(() {
-              _newShortcut = '';
-              _isRecording = false;
-            });
-          },
-          child: const Text('清除'),
-        ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
         TextButton(
           onPressed: () {
-            widget.onSave(_newShortcut);
+            widget.onSave(_buildShortcutString());
           },
           child: const Text('保存'),
         ),
       ],
     );
-  }
-  
-  @override
-  void dispose() {
-    super.dispose();
   }
 } 

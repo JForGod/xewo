@@ -17,42 +17,46 @@ class LoadingIndicator extends StatelessWidget {
   /// 指示器线宽
   final double strokeWidth;
   
+  /// 是否显示消息
+  final bool showMessage;
+  
   const LoadingIndicator({
     super.key,
     this.message,
-    this.size = 40,
+    this.showMessage = true,
+    this.size = 24.0,
     this.color,
-    this.strokeWidth = 4.0,
+    this.strokeWidth = 2.0,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: size,
-            height: size,
-            child: CircularProgressIndicator(
-              strokeWidth: strokeWidth,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                color ?? AppTheme.primary,
-              ),
+    final theme = Theme.of(context);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: size,
+          height: size,
+          child: CircularProgressIndicator(
+            strokeWidth: strokeWidth,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              color ?? theme.colorScheme.primary,
             ),
           ),
-          if (message != null) ...[
-            const SizedBox(height: AppTheme.spacingMd),
-            Text(
-              message!,
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.neutral600,
-              ),
-              textAlign: TextAlign.center,
+        ),
+        if (showMessage && message != null) ...[
+          const SizedBox(height: 16),
+          Text(
+            message!,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurface.withOpacity(0.8),
             ),
-          ],
+          ),
         ],
-      ),
+      ],
     );
   }
 }

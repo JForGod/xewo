@@ -9,15 +9,19 @@ class FindReplaceDialog extends StatefulWidget {
   /// 是否显示替换选项
   final bool showReplace;
   
+  /// 查找回调
+  final void Function(String pattern, bool caseSensitive, bool wholeWord) onFind;
+  
   /// 替换回调
-  final Function(String) onReplace;
+  final void Function(String pattern, String replacement, bool caseSensitive, bool wholeWord) onReplace;
 
   const FindReplaceDialog({
-    Key? key,
+    super.key,
     required this.initialText,
     this.showReplace = false,
+    required this.onFind,
     required this.onReplace,
-  }) : super(key: key);
+  });
 
   @override
   State<FindReplaceDialog> createState() => _FindReplaceDialogState();
@@ -146,7 +150,7 @@ class _FindReplaceDialogState extends State<FindReplaceDialog> {
   
   // 完成替换
   void _finishReplace() {
-    widget.onReplace(_currentText);
+    widget.onReplace(_getSearchPattern().pattern, _replaceController.text, _caseSensitive, _wholeWord);
   }
 
   @override

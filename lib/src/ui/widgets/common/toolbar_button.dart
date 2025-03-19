@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../themes/app_theme.dart';
 
 class ToolbarButton extends StatelessWidget {
   final IconData icon;
@@ -17,27 +16,17 @@ class ToolbarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: isActive ? AppTheme.primary50 : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: isActive ? AppTheme.primary600 : AppTheme.neutral600,
-            ),
-          ),
+      child: IconButton(
+        icon: Icon(
+          icon,
+          color: isActive ? theme.colorScheme.primary : theme.colorScheme.onSurface,
         ),
+        onPressed: onPressed,
+        splashRadius: 20,
       ),
     );
   }

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 
 /// 应用配置类，管理应用级别的配置信息和初始化流程
 class AppConfig {
   // 单例模式
-  static final AppConfig _instance = AppConfig._internal();
-  static AppConfig get instance => _instance;
+  static final AppConfig instance = AppConfig._internal();
   
   AppConfig._internal();
+  
+  bool _initialized = false;
   
   // 配置信息
   late final String appVersion;
@@ -17,15 +19,30 @@ class AppConfig {
   
   // 初始化配置
   Future<void> initialize() async {
-    appVersion = '1.0.0';
-    isDevelopment = true;
-    dataDirectory = '.';
+    if (_initialized) return;
     
-    // 从SharedPreferences加载主题设置
-    final prefs = await SharedPreferences.getInstance();
-    final themeModeIndex = prefs.getInt('theme_mode') ?? 0;
-    themeMode = ThemeMode.values[themeModeIndex];
+    try {
+      // 基础初始化
+      debugPrint('AppConfig: 初始化开始');
+      
+      appVersion = '1.0.0';
+      isDevelopment = true;
+      dataDirectory = '.';
+      
+      // 从SharedPreferences加载主题设置
+      final prefs = await SharedPreferences.getInstance();
+      final themeModeIndex = prefs.getInt('theme_mode') ?? 0;
+      themeMode = ThemeMode.values[themeModeIndex];
+      
+      _initialized = true;
+      debugPrint('AppConfig: 初始化完成');
+    } catch (e) {
+      debugPrint('AppConfig: 初始化失败 - $e');
+      rethrow;
+    }
   }
+  
+  bool get isInitialized => _initialized;
   
   // 获取应用版本
   String getAppVersion() => appVersion;

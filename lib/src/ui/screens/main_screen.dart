@@ -1,177 +1,277 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../themes/app_theme.dart';
 import '../widgets/navigation/nav_bar.dart';
-import '../widgets/ai_assistant/ai_assistant_panel.dart';
-import 'database/database_screen.dart';
-import 'editor/editor_screen.dart';
-import 'home/home_screen.dart';
-import 'settings/settings_screen.dart';
-import 'project/project_screen.dart';
-import 'analysis/analysis_screen.dart';
-import 'tools/tools_screen.dart';
-import 'debug/debug_screen.dart';
-import 'ai/ai_screen.dart';
-import 'extensions/extensions_screen.dart';
-import 'learning/learning_screen.dart';
-import 'help/help_screen.dart';
 import '../widgets/common/toolbar_button.dart';
+import '../../state/providers/navigation_provider.dart';
+import 'home/home_screen.dart';
+import 'project/project_screen.dart';
+import 'coding/coding_screen.dart';
+import '../widgets/common/navigation_rail.dart';
+import '../widgets/editor/editor_toolbar.dart';
+import '../widgets/editor/code_editor.dart';
+import '../../services/app_config.dart';
+import '../../state/providers/editor_state.dart';
+import '../../features/ai_assistant/presentation/pages/ai_assistant_entry.dart';
+import 'learning/learning_screen.dart';
+import 'settings/settings_screen.dart';
 
-/// 当前选中的导航项
-final selectedNavItemProvider = StateProvider<String>((ref) => 'home');
-
-class MainScreen extends ConsumerWidget {
-  const MainScreen({super.key});
+class MainScreen extends ConsumerStatefulWidget {
+  const MainScreen({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final selectedNavItem = ref.watch(selectedNavItemProvider);
-    
-    return Scaffold(
-      body: Row(
-        children: [
-          // 导航栏 (APP-NAV-BAR-001)
-          const NavBar(),
+  ConsumerState<MainScreen> createState() => _MainScreenState();
+}
 
-          // 主内容区域 (APP-CNT-ARE-001)
-          Expanded(
-            child: Container(
-              color: AppTheme.neutral100,
-              child: Column(
-                children: [
-                  // 工具栏 (APP-TLB-MAN-001)
-                  Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.spacingMd,
-                    ),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      border: Border(
-                        bottom: BorderSide(color: Color(0xFFEEEEEE)),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        ToolbarButton(
-                          icon: Icons.menu,
-                          tooltip: '菜单',
-                          onPressed: () {},
-                        ),
-                        const SizedBox(width: 4),
-                        ToolbarButton(
-                          icon: Icons.add,
-                          tooltip: '新建',
-                          onPressed: () {},
-                        ),
-                        const SizedBox(width: 4),
-                        ToolbarButton(
-                          icon: Icons.chat,
-                          tooltip: '聊天',
-                          onPressed: () {
-                            ref.read(selectedNavItemProvider.notifier).state = 'ai';
-                          },
-                          isActive: selectedNavItem == 'ai',
-                        ),
-                        const SizedBox(width: 4),
-                        ToolbarButton(
-                          icon: Icons.code,
-                          tooltip: '编辑器',
-                          onPressed: () {
-                            ref.read(selectedNavItemProvider.notifier).state = 'editor';
-                          },
-                          isActive: selectedNavItem == 'editor',
-                        ),
-                        const SizedBox(width: 4),
-                        ToolbarButton(
-                          icon: Icons.storage,
-                          tooltip: '数据库',
-                          onPressed: () {
-                            ref.read(selectedNavItemProvider.notifier).state = 'database';
-                          },
-                          isActive: selectedNavItem == 'database',
-                        ),
-                        const SizedBox(width: 4),
-                        ToolbarButton(
-                          icon: Icons.settings,
-                          tooltip: '设置',
-                          onPressed: () {
-                            ref.read(selectedNavItemProvider.notifier).state = 'settings';
-                          },
-                          isActive: selectedNavItem == 'settings',
-                        ),
-                      ],
-                    ),
+class _MainScreenState extends ConsumerState<MainScreen> {
+  // 添加状态变量
+  final List<String> openFiles = [];
+  int _activeFileIndex = -1;
+  
+  // 添加文件操作方法
+  void _switchToFile(int index) {
+    setState(() {
+      _activeFileIndex = index;
+    });
+  }
+
+  void _closeFile(int index) {
+    setState(() {
+      openFiles.removeAt(index);
+      if (_activeFileIndex >= openFiles.length) {
+        _activeFileIndex = openFiles.length - 1;
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (kDebugMode) {
+      print('MainScreen initialized');
+    }
+    _restoreAppState();
+  }
+
+  Future<void> _restoreAppState() async {
+    final config = ref.read(appConfigProvider);
+    // TODO: 恢复上次的状态
+  }
+
+  @override
+  void dispose() {
+    if (kDebugMode) {
+      print('MainScreen disposed');
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (kDebugMode) {
+      print('Building MainScreen');
+    }
+
+    try {
+      final selectedNavItem = ref.watch(selectedNavItemProvider);
+      
+      return Scaffold(
+        body: Column(
+          children: [
+            // 主菜单栏 - 暂时简化以确保可以启动
+            Container(
+              height: 32,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).dividerColor,
+                    width: 1,
                   ),
-
-                  // 内容区域
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu, size: 16),
+                    onPressed: () {
+                      // 切换导航栏显示
+                      ref.read(navigationRailVisibilityProvider.notifier).state = 
+                        !ref.read(navigationRailVisibilityProvider);
+                    },
+                  ),
+                  // 暂时移除 EditorTabs，等程序能启动后再添加
+                  const Spacer(),
+                ],
+              ),
+            ),
+            
+            // 主体内容区域
+            Expanded(
+              child: Row(
+                children: [
+                  // 导航栏
+                  if (ref.watch(navigationRailVisibilityProvider))
+                    const NavigationRailWidget(),
+                  
+                  // 编辑器区域
                   Expanded(
                     child: _buildContent(selectedNavItem),
                   ),
                 ],
               ),
             ),
-          ),
+          ],
+        ),
+      );
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error in MainScreen build: $e\n$stackTrace');
+      }
+      return const Scaffold(
+        body: Center(
+          child: Text('发生错误，请重试'),
+        ),
+      );
+    }
+  }
 
-          // AI助手面板 (GLB-AST-MAN-001)
-          const AiAssistantPanel(),
+  Widget _buildContent(String navItem) {
+    if (kDebugMode) {
+      print('Building content for: $navItem');
+    }
+
+    try {
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: _getContentWidget(navItem),
+      );
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error in _buildContent: $e\n$stackTrace');
+      }
+      return Center(
+        key: ValueKey('error-$navItem'),
+        child: Text(
+          '加载页面失败: $navItem',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+      );
+    }
+  }
+
+  Widget _getContentWidget(String navItem) {
+    if (kDebugMode) {
+      print('Getting content widget for: $navItem');
+    }
+
+    try {
+      switch (navItem) {
+        case 'home':
+          return const HomeScreen(key: ValueKey('home'));
+        case 'projects':
+          return const ProjectScreen(key: ValueKey('projects'));
+        case 'editor':
+          return const CodingScreen(key: ValueKey('editor'));
+        case 'ai':
+          return const AIAssistantEntry(key: ValueKey('ai'));
+        case 'learning':
+          return const LearningScreen(key: ValueKey('learning'));
+        case 'database':
+          // 临时返回占位页面
+          return _buildPlaceholderScreen('数据库', navItem);
+        case 'settings':
+          // 2025-03-17: 修改-将设置导航项指向实际的设置屏幕而非占位符
+          return const SettingsScreen(key: ValueKey('settings'));
+        default:
+          return _buildPlaceholderScreen('未知页面', navItem);
+      }
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error in _getContentWidget: $e\n$stackTrace');
+      }
+      return Center(
+        key: ValueKey('error-$navItem'),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '页面加载错误: $navItem',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                setState(() {});
+              },
+              child: const Text('点击重试'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildPlaceholderScreen(String title, String navItem) {
+    return Center(
+      key: ValueKey('placeholder-$navItem'),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.construction,
+            size: 48,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '$title - 开发中',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '该功能正在开发中，敬请期待',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+            ),
+          ),
         ],
       ),
     );
   }
-  
-  /// 根据选中的导航项构建内容
-  Widget _buildContent(String navItem) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      transitionBuilder: (Widget child, Animation<double> animation) {
-        return FadeTransition(
-          opacity: animation,
-          child: child,
-        );
-      },
-      child: _getContentWidget(navItem),
+
+  void _handleFormat() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('格式化功能开发中')),
     );
   }
 
-  /// 获取内容widget
-  Widget _getContentWidget(String navItem) {
-    switch (navItem) {
-      case 'home':
-        return const HomeScreen(key: ValueKey('home'));
-      case 'projects':
-        return const ProjectScreen(key: ValueKey('projects'));
-      case 'analysis':
-        return const AnalysisScreen(key: ValueKey('analysis'));
-      case 'tools':
-        return const ToolsScreen(key: ValueKey('tools'));
-      case 'debug':
-        return const DebugScreen(key: ValueKey('debug'));
-      case 'ai':
-        return const AiScreen(key: ValueKey('ai'));
-      case 'extensions':
-        return const ExtensionsScreen(key: ValueKey('extensions'));
-      case 'learning':
-        return const LearningScreen(key: ValueKey('learning'));
-      case 'help':
-        return const HelpScreen(key: ValueKey('help'));
-      case 'settings':
-        return const SettingsScreen(key: ValueKey('settings'));
-      case 'editor':
-        return const EditorScreen(key: ValueKey('editor'));
-      case 'database':
-        return const DatabaseScreen(key: ValueKey('database'));
-      default:
-        return Container(
-          key: const ValueKey('default'),
-          padding: const EdgeInsets.all(AppTheme.spacingLg),
-          child: Center(
-            child: Text(
-              '选择了: $navItem',
-              style: AppTheme.titleLarge,
-            ),
-          ),
-        );
-    }
+  void _handleFindReplace() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('查找替换功能开发中')),
+    );
+  }
+
+  void _handleSettings() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('设置功能开发中')),
+    );
+  }
+
+  void _handleToggleLineNumbers() {
+    ref.read(editorStateProvider.notifier).toggleLineNumbers();
+  }
+
+  void _handleToggleMinimap() {
+    ref.read(editorStateProvider.notifier).toggleMinimap();
   }
 } 

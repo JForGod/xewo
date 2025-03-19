@@ -198,7 +198,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 child: Text(
                   group.title,
-                  style: AppTheme.titleMedium.copyWith(
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),

@@ -5,6 +5,58 @@ import 'package:postgres/postgres.dart';
 import 'database_service.dart';
 import 'query_result.dart';
 
+/// 数据库连接配置
+class DatabaseConfig {
+  final String host;
+  final int port;
+  final String database;
+  final String username;
+  final String password;
+  final DatabaseType type;
+
+  DatabaseConfig({
+    required this.host,
+    required this.port,
+    required this.database,
+    required this.username,
+    required this.password,
+    required this.type,
+  });
+}
+
+/// 数据库类型
+enum DatabaseType {
+  sqlite,
+  mysql,
+  postgresql,
+}
+
+/// 查询结果
+class QueryResult {
+  final List<List<dynamic>> rows;
+  final Duration duration;
+  final int affectedRows;
+
+  QueryResult(this.rows, this.duration, {this.affectedRows = 0});
+
+  factory QueryResult.fromMaps(List<Map<String, dynamic>> maps, Duration duration, {int affectedRows = 0}) {
+    return QueryResult(
+      maps.map((map) => map.values.toList()).toList(),
+      duration,
+      affectedRows: affectedRows,
+    );
+  }
+}
+
+/// 数据库异常
+class DatabaseException implements Exception {
+  final String message;
+  DatabaseException(this.message);
+  
+  @override
+  String toString() => message;
+}
+
 /// 数据库连接接口
 abstract class DatabaseConnection {
   Future<QueryResult> executeQuery(String query, [List<dynamic>? params]);
@@ -65,7 +117,7 @@ class MySqlConnection implements DatabaseConnection {
 
 /// PostgreSQL数据库连接
 class PostgreSqlConnection implements DatabaseConnection {
-  final PostgreSQLConnection _conn;
+  final Connection _conn;
   final DatabaseConfig _config;
   
   PostgreSqlConnection(this._conn, this._config);
@@ -73,21 +125,15 @@ class PostgreSqlConnection implements DatabaseConnection {
   @override
   Future<QueryResult> executeQuery(String query, [List<dynamic>? params]) async {
     final stopwatch = Stopwatch()..start();
-    
-    final result = await _conn.query(
-      query,
-      substitutionValues: params?.asMap().map(
-        (key, value) => MapEntry((key + 1).toString(), value),
-      ),
-    );
-    
-    stopwatch.stop();
-    
-    return QueryResult.fromMaps(
-      result.map((row) => row.toColumnMap()).toList(),
-      stopwatch.elapsed,
-      affectedRows: result.affectedRowCount ?? 0,
-    );
+    try {
+      final results = await _conn.execute(query, parameters: params);
+      return QueryResult(
+        results.map((row) => row.toList()).toList(),
+        stopwatch.elapsed,
+      );
+    } catch (e) {
+      throw DatabaseException('执行查询失败: $e');
+    }
   }
   
   @override
