@@ -14,7 +14,7 @@ class StandardTheme {
   static const Color accentColor = Color(0xFF82D2B4);
   static const Color backgroundColor = Color(0xFF1C1C28);
   static const Color surfaceColor = Color(0xFF2A2A38);
-  static const Color headerBackground = Color(0xFF252535);
+  static const Color headerBackground = Color(0xFF25354D);
   
   // 标准模式特定装饰
   static BoxDecoration get containerDecoration => BoxDecoration(

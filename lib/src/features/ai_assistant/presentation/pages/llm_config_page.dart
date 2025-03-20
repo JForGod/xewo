@@ -1,11 +1,15 @@
 // 2025-03-17: 新增 - LLM配置页面
+// 2025-03-20: 修改 - 添加模型选择,移动按钮位置,集成悬浮测试对话框
 
+import 'dart:async';  // 添加此行导入TimeoutException
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../themes/standard_theme.dart';
 import '../../../../core/ai_engine/llm/llm_config_service.dart';
 import '../../../../core/ai_engine/llm/llm_service_provider.dart';
+import '../../../../core/ai_engine/llm/gemini_models.dart';
+import '../widgets/floating_test_dialog.dart';
 
 /// LLM配置页面
 class LLMConfigPage extends ConsumerStatefulWidget {
@@ -47,6 +51,12 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
   /// 开发者模式（跳过API验证）
   bool _devMode = false;
   
+  /// 是否显示测试对话框
+  bool _showTestDialog = false;
+  
+  /// 当前选择的Gemini模型
+  GeminiModel _selectedGeminiModel = GeminiModel.gemini15Pro;
+  
   @override
   void initState() {
     super.initState();
@@ -80,15 +90,10 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
       
       // 加载模型配置
       final config = _configService!.getConfig(_selectedProvider!);
-      final availableModels = _configService!.getAvailableModels(_selectedProvider!);
-      
-      if (config.containsKey('model') && availableModels.contains(config['model'])) {
-        _modelController.text = config['model'] as String;
-      } else {
-        // 如果保存的模型不在可用列表中，使用第一个可用模型
-        if (availableModels.isNotEmpty) {
-          _modelController.text = availableModels.first;
-        }
+      if (config.containsKey('model')) {
+        final modelId = config['model'] as String;
+        _selectedGeminiModel = GeminiModel.fromModelId(modelId) ?? GeminiModel.gemini15Pro;
+        _modelController.text = _selectedGeminiModel.modelId;
       }
       
       // 加载代理配置
@@ -129,10 +134,9 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
     await _configService!.saveApiKey(_selectedProvider!, apiKey);
     
     // 保存模型配置
-    final model = _modelController.text.trim();
-    if (model.isNotEmpty) {
-      await _configService!.saveConfig(_selectedProvider!, {'model': model});
-    }
+    await _configService!.saveConfig(_selectedProvider!, {
+      'model': _selectedGeminiModel.modelId,
+    });
     
     // 保存代理配置
     await _configService!.saveProxyConfig(
@@ -167,18 +171,13 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
       
       // 加载当前提供者的模型配置
       final config = _configService!.getConfig(provider);
-      final availableModels = _configService!.getAvailableModels(provider);
-      
-      // 检查保存的模型是否在可用列表中
-      if (config.containsKey('model') && availableModels.contains(config['model'])) {
-        _modelController.text = config['model'] as String;
+      if (config.containsKey('model')) {
+        final modelId = config['model'] as String;
+        _selectedGeminiModel = GeminiModel.fromModelId(modelId) ?? GeminiModel.gemini15Pro;
+        _modelController.text = _selectedGeminiModel.modelId;
       } else {
-        // 如果保存的模型不在可用列表中，使用第一个可用模型
-        if (availableModels.isNotEmpty) {
-          _modelController.text = availableModels.first;
-        } else {
-          _modelController.text = '';
-        }
+        _selectedGeminiModel = GeminiModel.gemini15Pro;
+        _modelController.text = _selectedGeminiModel.modelId;
       }
     });
   }
@@ -188,10 +187,6 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
     if (_selectedProvider == null || _configService == null) {
       return;
     }
-    
-    setState(() {
-      _isLoading = true;
-    });
     
     try {
       // 临时保存当前配置
@@ -203,7 +198,7 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
       // 保存模型配置
       await _configService!.saveConfig(
         _selectedProvider!,
-        {'model': _modelController.text},
+        {'model': _selectedGeminiModel.modelId},
       );
       
       // 保存代理配置
@@ -226,81 +221,59 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
       // 尝试初始化LLM服务
       final llmService = await _configService!.getActiveLLMService();
       
-      // 直接测试连接
-      final success = await llmService.testConnection();
+      bool? success;
+      try {
+        success = await Future.any([
+          llmService.testConnection(),
+          Future.delayed(const Duration(seconds: 30)).then((_) => null),
+        ]);
+      } catch (e) {
+        if (e is TimeoutException) {
+          throw TimeoutException('API连接测试超时,请检查网络连接或代理设置');
+        } else {
+          _showTestResult(false, "连接测试错误: ${e.toString()}");
+          return;
+        }
+      }
+      
+      if (success == null) {
+        throw TimeoutException('API连接测试超时,请检查网络连接或代理设置');
+      }
       
       if (success) {
-        _showTestResult(true, "连接测试成功！");
-        
-        // 如果连接成功，尝试进行会话测试
+        String? sessionResponse;
         try {
-          final sessionResponse = await llmService.sessionTest();
-          _showTestResult(true, "会话测试成功:\n$sessionResponse");
-        } catch (sessionError) {
-          _showTestResult(false, "连接成功但会话测试失败：${sessionError.toString()}");
+          sessionResponse = await Future.any([
+            llmService.sessionTest(),
+            Future.delayed(const Duration(seconds: 30)).then((_) => null),
+          ]);
+        } catch (e) {
+          sessionResponse = null;
         }
+        
+        if (sessionResponse == null) {
+          throw TimeoutException('会话测试超时,请检查网络连接或代理设置');
+        }
+        
+        _showTestResult(true, "会话测试成功:\n$sessionResponse");
       } else {
         _showTestResult(false, "连接测试失败");
       }
+    } on TimeoutException catch (e) {
+      _showTestResult(false, e.message ?? "API请求超时");
     } catch (e) {
       _showTestResult(false, "错误：${e.toString()}");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
     }
   }
   
+  /// 显示测试结果
   void _showTestResult(bool success, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(success ? '连接成功' : '连接失败'),
-        content: SingleChildScrollView(
-          child: Text(message),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('LLM服务配置'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _buildConfigForm(),
-    );
-  }
-  
-  /// 构建配置表单
-  Widget _buildConfigForm() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildProviderSelection(),
-          const SizedBox(height: 24),
-          _buildApiKeyInput(),
-          const SizedBox(height: 16),
-          _buildModelSelection(),
-          const SizedBox(height: 16),
-          _buildProxySettings(),
-          const SizedBox(height: 24),
-          _buildActionButtons(),
-        ],
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: success ? Colors.green : Colors.red,
       ),
     );
   }
@@ -335,6 +308,111 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
     );
   }
   
+  /// 构建模型选择
+  Widget _buildModelSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '模型选择',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<GeminiModel>(
+          value: _selectedGeminiModel,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            fillColor: Color(0xFF2A2A38),
+            filled: true,
+          ),
+          items: GeminiModel.values.map((model) {
+            return DropdownMenuItem(
+              value: model,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 42),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      model.modelId,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      model.description,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[400],
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+          onChanged: (model) {
+            if (model != null) {
+              setState(() {
+                _selectedGeminiModel = model;
+                _modelController.text = model.modelId;
+              });
+            }
+          },
+          isExpanded: true,
+          itemHeight: 60,
+          dropdownColor: const Color(0xFF2A2A38),
+          menuMaxHeight: 300,
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+          style: const TextStyle(color: Colors.white),
+          selectedItemBuilder: (BuildContext context) {
+            return GeminiModel.values.map<Widget>((GeminiModel model) {
+              return Container(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  model.modelId,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white,
+                  ),
+                ),
+              );
+            }).toList();
+          },
+        ),
+        if (_selectedGeminiModel.isExperimental)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '注意：这是一个实验性模型',
+              style: TextStyle(
+                color: Colors.orange[800],
+                fontSize: 12,
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            '推荐用途：${_selectedGeminiModel.recommendedUse}',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+  
   /// 构建API密钥输入
   Widget _buildApiKeyInput() {
     return Column(
@@ -348,101 +426,24 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
           ),
         ),
         const SizedBox(height: 8),
-        TextField(
+        TextFormField(
           controller: _apiKeyController,
           decoration: InputDecoration(
-            hintText: '输入API密钥',
             border: const OutlineInputBorder(),
-            suffixIcon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: Icon(
-                    _isApiKeyVisible ? Icons.visibility_off : Icons.visibility,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isApiKeyVisible = !_isApiKeyVisible;
-                    });
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.content_paste),
-                  onPressed: () async {
-                    final data = await Clipboard.getData('text/plain');
-                    if (data != null && data.text != null) {
-                      _apiKeyController.text = data.text!;
-                    }
-                  },
-                ),
-              ],
+            hintText: '请输入API密钥',
+            suffixIcon: IconButton(
+              icon: Icon(
+                _isApiKeyVisible ? Icons.visibility_off : Icons.visibility,
+              ),
+              onPressed: () {
+                setState(() {
+                  _isApiKeyVisible = !_isApiKeyVisible;
+                });
+              },
             ),
           ),
           obscureText: !_isApiKeyVisible,
         ),
-        const SizedBox(height: 8),
-        Text(
-          _getApiKeyHelp(),
-          style: const TextStyle(
-            fontSize: 12,
-            color: Colors.grey,
-          ),
-        ),
-      ],
-    );
-  }
-  
-  /// 构建模型选择
-  Widget _buildModelSelection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          '模型',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (_selectedProvider != null) 
-          Builder(
-            builder: (context) {
-              final availableModels = _configService!.getAvailableModels(_selectedProvider!);
-              // 确保当前选中的模型在可用列表中
-              final modelValue = availableModels.contains(_modelController.text) 
-                  ? _modelController.text 
-                  : availableModels.isNotEmpty 
-                      ? availableModels.first 
-                      : '';
-                      
-              if (modelValue != _modelController.text) {
-                _modelController.text = modelValue;
-              }
-              
-              return DropdownButtonFormField<String>(
-                value: modelValue,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                ),
-                items: availableModels
-                    .map((model) => DropdownMenuItem(
-                          value: model,
-                          child: Text(model),
-                        ))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _modelController.text = value;
-                    });
-                  }
-                },
-              );
-            }
-          )
-        else
-          const Text('未选择提供者'),
       ],
     );
   }
@@ -470,93 +471,84 @@ class _LLMConfigPageState extends ConsumerState<LLMConfigPage> {
           },
         ),
         if (_useProxy) ...[
-          const SizedBox(height: 8),
-          TextField(
+          TextFormField(
             controller: _proxyHostController,
             decoration: const InputDecoration(
-              labelText: '代理地址',
-              hintText: '127.0.0.1',
               border: OutlineInputBorder(),
+              labelText: '代理主机',
             ),
           ),
           const SizedBox(height: 8),
-          TextField(
+          TextFormField(
             controller: _proxyPortController,
             decoration: const InputDecoration(
-              labelText: '代理端口',
-              hintText: '1080',
               border: OutlineInputBorder(),
+              labelText: '代理端口',
             ),
             keyboardType: TextInputType.number,
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
             ],
           ),
-          const SizedBox(height: 8),
-          const Text(
-            '注意：使用Gemini API时通常需要配置代理',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.amber,
+        ],
+      ],
+    );
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: const Text('LLM配置'),
+            actions: [
+              // 测试连接按钮
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _showTestDialog = true;
+                  });
+                },
+                icon: const Icon(Icons.wifi_tethering),
+                label: const Text('测试连接'),
+              ),
+              const SizedBox(width: 8),
+              // 保存配置按钮
+              TextButton.icon(
+                onPressed: _saveConfig,
+                icon: const Icon(Icons.save),
+                label: const Text('保存配置'),
+              ),
+              const SizedBox(width: 16),
+            ],
+          ),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildProviderSelection(),
+                const SizedBox(height: 24),
+                _buildModelSelection(),
+                const SizedBox(height: 24),
+                _buildApiKeyInput(),
+                const SizedBox(height: 24),
+                _buildProxySettings(),
+              ],
             ),
           ),
-        ],
-        const SizedBox(height: 16),
-        const Divider(),
-        const SizedBox(height: 8),
-        SwitchListTile(
-          title: const Text('开发者模式'),
-          subtitle: const Text('跳过API密钥验证，用于本地开发'),
-          value: _devMode,
-          onChanged: (value) {
-            setState(() {
-              _devMode = value;
-            });
-          },
         ),
+        if (_showTestDialog)
+          FloatingTestDialog(
+            onTest: _testConnection,
+            onClose: () {
+              setState(() {
+                _showTestDialog = false;
+              });
+            },
+          ),
       ],
     );
-  }
-  
-  /// 构建操作按钮
-  Widget _buildActionButtons() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        OutlinedButton(
-          onPressed: _testConnection,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: StandardTheme.accentColor,
-          ),
-          child: const Text('测试连接'),
-        ),
-        const SizedBox(width: 16),
-        ElevatedButton(
-          onPressed: _saveConfig,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: StandardTheme.accentColor,
-          ),
-          child: const Text('保存配置'),
-        ),
-      ],
-    );
-  }
-  
-  /// 获取API密钥帮助文本
-  String _getApiKeyHelp() {
-    if (_selectedProvider == null) {
-      return '';
-    }
-    
-    switch (_selectedProvider!) {
-      case LLMProvider.gemini:
-        return '请在Google AI Studio获取Gemini API密钥:\nhttps://makersuite.google.com/app/apikey';
-      case LLMProvider.openAI:
-        return '请在OpenAI平台获取API密钥:\nhttps://platform.openai.com/api-keys';
-      case LLMProvider.mock:
-        return '模拟服务无需真实API密钥，可输入任意值';
-      case LLMProvider.custom:
-        return '请根据您的自定义服务提供商要求输入API密钥';
-    }
   }
 } 
