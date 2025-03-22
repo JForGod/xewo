@@ -6,15 +6,18 @@ import '../widgets/assistant_container.dart';
 import '../widgets/multimodal_controls.dart';
 import '../widgets/chat_interface.dart';
 import 'llm_config_page.dart';
+import 'settings/routes.dart';
 import '../../domain/models/assistant_mode.dart';
 import '../../domain/models/conversation.dart';
 import '../../domain/models/chat_message.dart';
 import '../../providers/conversation_provider.dart';
 import '../../../../core/ai_engine/llm/llm_service_provider.dart';
 import 'package:flutter/foundation.dart';
+import '../../domain/models/interaction_mode.dart';
 
 // 2025-03-17: 修改 - 更新标准模式页面，集成聊天界面组件
 // 2025-03-18: 修改 - 添加LLM配置入口
+// 2025-03-22: 修改 - 将设置按钮改为打开多模态设置页面
 class StandardModePage extends ConsumerStatefulWidget {
   const StandardModePage({Key? key}) : super(key: key);
 
@@ -102,13 +105,15 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 2025-03-25 修改 - 移除SingleChildScrollView，改为Column直接使用Expanded，解决Row区域不显示问题
     return AssistantContainer(
       mode: AssistantMode.standard,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildHeader(),
           const SizedBox(height: 12),
-          // 2025-03-17: 修改 - 使用聊天界面组件替换原有聊天区域
+          // 2025-03-25 修改 - 使用Expanded让聊天区域自适应高度
           Expanded(
             child: ChatInterface(
               chatMode: ConversationType.general,
@@ -120,27 +125,11 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
           const SizedBox(height: 12),
           _buildSuggestions(),
           const SizedBox(height: 12),
-          // 2025-03-23: 修改 - 重新添加MultimodalControls，确保UI结构符合规范
+          // 2025-03-25 修改 - 确保MultimodalControls始终显示在底部
           MultimodalControls(
-            currentMode: _currentInteractionMode,
-            onModeChanged: (mode) {
-              setState(() {
-                _currentInteractionMode = mode;
-              });
-            },
-            hintText: '输入消息，按回车发送...',
-            onSubmit: (text) async {
-              try {
-                final notifier = ref.read(conversationProvider.notifier);
-                await notifier.sendMessageToLLM(text);
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('发送消息失败: $e')),
-                  );
-                }
-              }
-            },
+            mode: AssistantMode.standard,
+            onModeChanged: _handleModeChange,
+            onSubmit: _handleSubmit,
           ),
         ],
       ),
@@ -150,6 +139,7 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
   // 2025-03-17: 修改 - 更新标题栏，添加会话管理功能
   // 2025-03-18: 修改 - 添加LLM设置按钮
   // 2025-03-20: 修改 - 添加会话历史管理菜单
+  // 2025-03-22: 修改 - 更新设置按钮为多模态设置入口
   Widget _buildHeader() {
     // 获取活动会话信息
     final activeConversation = ref.watch(activeConversationProvider);
@@ -236,16 +226,15 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
             tooltip: '会话管理',
             onPressed: () => _showConversationMenu(),
           ),
-          // LLM配置按钮
+          // 多模态设置按钮（以前是LLM配置按钮）
           IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'LLM服务设置',
+            icon: Icon(
+              Icons.settings,
+              color: hasLLMError ? Colors.red : Colors.grey,
+            ),
+            tooltip: '设置',
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => const LLMConfigPage(),
-                ),
-              );
+              SettingsRoutes.navigateToMultimodalSettings(context);
             },
           ),
           IconButton(
@@ -652,19 +641,14 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
         final conversation = conversations[index];
         final isActive = ref.read(conversationProvider.notifier).activeConversationId == conversation.id;
         
-        // 计算预览文本（最后一条非系统消息）
+        // 简化预览文本计算，减少性能开销
         String previewText = '';
         if (conversation.messages.isNotEmpty) {
-          final nonSystemMessages = conversation.messages
-              .where((m) => m.type != MessageType.system)
-              .toList();
-          
-          if (nonSystemMessages.isNotEmpty) {
-            final lastMessage = nonSystemMessages.last;
-            previewText = lastMessage.text;
-            if (previewText.length > 50) {
-              previewText = '${previewText.substring(0, 47)}...';
-            }
+          // 只获取最后一条消息，不进行复杂过滤
+          final lastMessage = conversation.messages.last;
+          previewText = lastMessage.text;
+          if (previewText.length > 50) {
+            previewText = '${previewText.substring(0, 47)}...';
           }
         }
         
@@ -676,182 +660,79 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
               fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
             ),
           ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${conversation.updatedAt.toLocal().toString().substring(0, 16)} · ${conversation.messages.length}条消息',
-                style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
+          subtitle: Text(
+            '${conversation.updatedAt.toLocal().toString().substring(0, 16)} · ${conversation.messages.length}条消息',
+            style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
+          ),
+          trailing: conversation.isFavorite
+            ? IconButton(
+                icon: const Icon(Icons.star, color: Colors.amber, size: 18),
+                tooltip: '取消收藏',
+                onPressed: () async {
+                  try {
+                    final notifier = ref.read(conversationProvider.notifier);
+                    await notifier.toggleFavoriteConversation(conversation.id);
+                    onUpdate();
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('操作失败: $e')),
+                      );
+                    }
+                  }
+                },
+              )
+            : IconButton(
+                icon: const Icon(Icons.star_border, color: Colors.grey, size: 18),
+                tooltip: '收藏会话',
+                onPressed: () async {
+                  try {
+                    final notifier = ref.read(conversationProvider.notifier);
+                    await notifier.toggleFavoriteConversation(conversation.id);
+                    onUpdate();
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('操作失败: $e')),
+                      );
+                    }
+                  }
+                },
               ),
-              if (previewText.isNotEmpty)
-                Text(
-                  previewText,
-                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-            ],
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (isActive)
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: StandardTheme.accentColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              const SizedBox(width: 4),
-              if (conversation.isFavorite)
-                IconButton(
-                  icon: const Icon(Icons.star, color: Colors.amber, size: 18),
-                  tooltip: '取消收藏',
-                  onPressed: () async {
-                    try {
-                      final notifier = ref.read(conversationProvider.notifier);
-                      await notifier.toggleFavoriteConversation(conversation.id);
-                      
-                      // 调用onUpdate回调刷新整个对话框
-                      onUpdate();
-                      
-                      // 显示操作成功的提示
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('已取消收藏'), 
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('操作失败: $e')),
-                        );
-                      }
-                    }
-                  },
-                )
-              else
-                IconButton(
-                  icon: const Icon(Icons.star_border, color: Colors.grey, size: 18),
-                  tooltip: '收藏会话',
-                  onPressed: () async {
-                    try {
-                      final notifier = ref.read(conversationProvider.notifier);
-                      await notifier.toggleFavoriteConversation(conversation.id);
-                      
-                      // 调用onUpdate回调刷新整个对话框
-                      onUpdate();
-                      
-                      // 显示操作成功的提示
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('已收藏会话'), 
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('操作失败: $e')),
-                        );
-                      }
-                    }
-                  },
-                ),
-            ],
-          ),
-          onTap: () async {
-            // 2025-03-28: 修改 - 增强会话切换的错误处理和用户反馈
-            
-            // 先关闭对话框，避免在操作完成后再关闭导致用户体验不好
+          onTap: () {
+            // 关闭对话框
             Navigator.pop(context);
             
-            // 显示加载指示器
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Row(
-                    children: [
-                      SizedBox(
-                        width: 20, 
-                        height: 20, 
-                        child: CircularProgressIndicator(strokeWidth: 2)
-                      ),
-                      SizedBox(width: 10),
-                      Text('正在切换会话...'),
-                    ],
-                  ),
-                  duration: Duration(milliseconds: 500),
-                ),
-              );
-            }
-            
-            try {
-              final notifier = ref.read(conversationProvider.notifier);
-              
-              // 切换活动会话
-              await notifier.setActiveConversation(conversation.id);
-              
-              // 显示成功提示
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('已切换到会话: ${conversation.title}'),
-                    duration: const Duration(seconds: 1),
-                    backgroundColor: Colors.green[700],
-                  ),
-                );
+            // 使用延迟操作来避免UI阻塞
+            Future.delayed(const Duration(milliseconds: 100), () async {
+              try {
+                final notifier = ref.read(conversationProvider.notifier);
                 
-                // 强制刷新整个页面状态
-                setState(() {});
-              }
-            } catch (e) {
-              // 显示详细的错误信息
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('切换会话失败: $e'),
-                    duration: const Duration(seconds: 3),
-                    backgroundColor: Colors.red[700],
-                    action: SnackBarAction(
-                      label: '重试',
-                      textColor: Colors.white,
-                      onPressed: () async {
-                        try {
-                          final notifier = ref.read(conversationProvider.notifier);
-                          await notifier.setActiveConversation(conversation.id);
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('已切换到会话: ${conversation.title}'),
-                                duration: const Duration(seconds: 1),
-                              ),
-                            );
-                          }
-                        } catch (retryError) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('重试失败: $retryError')),
-                            );
-                          }
-                        }
-                      },
+                // 显示加载指示器
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('正在切换会话...'),
+                      duration: Duration(seconds: 1),
                     ),
-                  ),
-                );
+                  );
+                }
+                
+                // 切换活动会话
+                await notifier.setActiveConversation(conversation.id);
+                
+                // 手动触发状态刷新
+                if (mounted) {
+                  setState(() {});
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('切换会话失败: $e')),
+                  );
+                }
               }
-              
-              if (kDebugMode) {
-                print('会话切换失败 - 详细错误: $e');
-              }
-            }
+            });
           },
           tileColor: isActive ? Colors.white.withOpacity(0.05) : null,
           shape: RoundedRectangleBorder(
@@ -985,6 +866,25 @@ class _StandardModePageState extends ConsumerState<StandardModePage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('删除消息失败: $e')),
+        );
+      }
+    }
+  }
+
+  void _handleModeChange(InteractionMode mode) {
+    setState(() {
+      _currentInteractionMode = mode;
+    });
+  }
+
+  void _handleSubmit(String text) async {
+    try {
+      final notifier = ref.read(conversationProvider.notifier);
+      await notifier.sendMessageToLLM(text);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('发送消息失败: $e')),
         );
       }
     }
